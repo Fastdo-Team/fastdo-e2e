@@ -1,0 +1,10 @@
+node_modules/
+*.mp4
+*.png
+*.log
+.env
+.auth/
+videos/
+recordings/
+.chrome_profile/
+diagnostics/
