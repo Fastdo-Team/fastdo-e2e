@@ -1,0 +1,818 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fastdo Eval Runner — QC</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --ink:#1c2024; --muted:#6b7480; --line:#e3e6ea; --line2:#eef0f3;
+    --ok:#14804a; --ok-bg:#e7f4ed; --bad:#b42318; --bad-bg:#fdecea;
+    --warn:#96650a; --warn-bg:#fdf5e3; --accent:#1b5fbe; --accent-bg:#e9f0fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#14171a; --card:#1c2024; --ink:#e8eaed; --muted:#97a0ab; --line:#2b3137; --line2:#23282d;
+      --ok:#5bcf94; --ok-bg:#16281f; --bad:#ff8b7e; --bad-bg:#2d1a18;
+      --warn:#e0b354; --warn-bg:#2a2313; --accent:#7aaaf0; --accent-bg:#16202f;
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .wrap { max-width:1400px; margin:0 auto; padding:18px 16px 80px; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  h2 { font-size:15px; margin:0 0 12px; }
+  .sub { color:var(--muted); font-size:13px; margin:0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .grow { flex:1; min-width:180px; }
+  button { font:inherit; padding:7px 13px; border-radius:7px; border:1px solid var(--line);
+    background:var(--card); color:var(--ink); cursor:pointer; white-space:nowrap; }
+  button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  button:disabled { opacity:.42; cursor:not-allowed; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button.primary:hover:not(:disabled) { color:#fff; filter:brightness(1.1); }
+  button.danger { color:var(--bad); border-color:var(--bad); }
+  button.sm { padding:4px 9px; font-size:12.5px; }
+  input, select { font:inherit; padding:7px 10px; border-radius:7px;
+    border:1px solid var(--line); background:var(--bg); color:var(--ink); width:100%; }
+  label.f { display:block; margin-bottom:10px; }
+  label.f span { display:block; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:7px 9px; border-bottom:1px solid var(--line2); vertical-align:top; }
+  th { font-size:11.5px; color:var(--muted); font-weight:600; text-transform:uppercase; letter-spacing:.03em;
+    position:sticky; top:0; background:var(--card); z-index:1; border-bottom:1px solid var(--line); }
+  tbody tr:hover { background:var(--accent-bg); }
+  tbody tr.sel { background:var(--accent-bg); }
+  .tablebox { max-height:56vh; overflow:auto; border:1px solid var(--line); border-radius:8px; }
+  .pill { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11.5px; font-weight:600; white-space:nowrap; }
+  .pill.ok{background:var(--ok-bg);color:var(--ok)} .pill.bad{background:var(--bad-bg);color:var(--bad)}
+  .pill.warn{background:var(--warn-bg);color:var(--warn)} .pill.info{background:var(--accent-bg);color:var(--accent)}
+  .pill.mute{background:var(--line2);color:var(--muted)}
+  .mono { font-family:ui-monospace,"Cascadia Code",Consolas,monospace; font-size:12.5px; }
+  .clip { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .log { background:#0e1114; color:#d6dce3; border-radius:8px; padding:12px; height:400px; overflow:auto;
+    white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,Consolas,monospace;
+    font-size:12.5px; line-height:1.45; }
+  .log .err { color:#ff9b8f; }
+  .hint { color:var(--muted); font-size:12.5px; margin:8px 0 0; }
+  .runitem { border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:10px; }
+  .runitem h3 { margin:0 0 6px; font-size:14px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  details summary { cursor:pointer; color:var(--muted); font-size:12.5px; }
+  pre.wrapped { white-space:pre-wrap; word-break:break-word; margin:8px 0 0; font-size:12.5px; }
+  .toast { position:fixed; right:16px; bottom:16px; max-width:440px; padding:12px 14px; border-radius:8px;
+    box-shadow:0 6px 24px rgba(0,0,0,.18); font-size:13px; z-index:9; }
+  .toast.ok{background:var(--ok-bg);color:var(--ok);border:1px solid var(--ok)}
+  .toast.bad{background:var(--bad-bg);color:var(--bad);border:1px solid var(--bad)}
+  .tabs { display:flex; gap:4px; margin-bottom:14px; flex-wrap:wrap; }
+  .tabs button.active, .chips button.active { background:var(--accent-bg); border-color:var(--accent); color:var(--accent); }
+  .chips { display:flex; gap:5px; flex-wrap:wrap; }
+  .bar { position:sticky; bottom:0; background:var(--card); border-top:1px solid var(--line);
+    margin:0 -16px -16px; padding:12px 16px; border-radius:0 0 10px 10px; }
+  .count { font-weight:600; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Fastdo Eval Runner — bảng điều khiển QC</h1>
+  <p class="sub">Chạy trên máy này. Chrome và video nằm ngay đây, không qua mạng.</p>
+
+  <div class="card" id="status"></div>
+  <p class="sub" style="margin:-6px 0 14px">Trang tự cập nhật — <span id="live" class="mono" style="color:var(--muted)">đang kết nối…</span></p>
+
+  <div class="tabs">
+    <button data-tab="cases" class="active">Bảng case</button>
+    <button data-tab="run">Đang chạy</button>
+    <button data-tab="history">Lịch sử &amp; duyệt</button>
+    <button data-tab="claude">Việc cho Claude <span id="qbadge"></span></button>
+    <button data-tab="config">Cấu hình</button>
+  </div>
+
+  <section data-panel="cases">
+    <div class="card">
+      <div class="row" style="margin-bottom:12px">
+        <input id="q" class="grow" placeholder="Tìm theo mã, function, tiêu đề, mô tả, nền tảng…" autocomplete="off">
+        <button id="btnRefreshSheet">Làm mới từ Sheet</button>
+        <span id="sheetInfo" class="hint" style="margin:0"></span>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <div class="chips" id="filters">
+          <button data-f="all" class="sm active">Tất cả</button>
+          <button data-f="scripted" class="sm">Có kịch bản</button>
+          <button data-f="unscripted" class="sm">Chưa có kịch bản</button>
+          <button data-f="never" class="sm">Chưa chạy vòng nào</button>
+          <button data-f="ran" class="sm">Đã chạy</button>
+        </div>
+        <span class="grow"></span>
+        <button id="btnPickAll" class="sm">Chọn hết đang hiện</button>
+        <button id="btnPickNone" class="sm">Bỏ chọn</button>
+      </div>
+
+      <div class="tablebox"><table id="tbl"><thead id="thead"></thead><tbody id="tbody"></tbody></table></div>
+
+      <div class="bar">
+        <div class="row">
+          <span class="count" id="pickInfo">Chưa chọn case nào</span>
+          <span class="grow"></span>
+          <label class="f" style="width:110px;margin:0"><span>Vòng</span><input id="round" type="number" min="1" value="1"></label>
+          <label class="f" style="width:120px;margin:0"><span>Slot</span>
+            <select id="account"><option value="1">Slot 1</option><option value="2">Slot 2</option></select></label>
+          <label class="f" style="width:200px;margin:0"><span>Ghi Sheet</span>
+            <select id="sheetOn">
+              <option value="pass">PASS ghi, FAIL chờ duyệt</option>
+              <option value="never">Không ghi</option>
+            </select></label>
+          <label class="f" style="width:110px;margin:0"><span>Video</span>
+            <select id="record"><option value="1">Có</option><option value="0">Không</option></select></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button id="btnPlan">Chuẩn bị (đọc Sheet)</button>
+          <button id="btnDry">Chạy nháp</button>
+          <button id="btnRun" class="primary">Chạy thật</button>
+          <button id="btnClaude">Giao Claude viết kịch bản</button>
+          <span class="grow"></span>
+          <span id="planline" class="hint" style="margin:0"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="run" hidden>
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <h2 style="margin:0">Nhật ký</h2>
+        <span id="running" class="mono" style="color:var(--accent)"></span>
+        <span id="timer" class="mono" style="color:var(--muted)"></span>
+        <span class="grow"></span>
+        <button id="btnStop" class="danger sm" disabled>Dừng</button>
+      </div>
+      <div id="conclusion"></div>
+      <div class="chips" id="logtabs" style="margin-bottom:10px"></div>
+      <div class="log" id="log"></div>
+      <p class="hint">Mỗi case một khung riêng — bấm vào mã để xem log của đúng case đó.</p>
+    </div>
+  </section>
+
+  <section data-panel="history" hidden>
+    <div class="card">
+      <h2>Các lần chạy gần đây</h2>
+      <p class="hint">Case KHÔNG ĐẠT dừng ở <b>chờ duyệt</b>: xem video, đối chiếu kết quả mong muốn, rồi mới ghi vào Sheet.</p>
+      <div id="runs" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <section data-panel="claude" hidden>
+    <div class="card">
+      <h2>Việc đang chờ Claude</h2>
+      <div id="claudeInfo" style="margin-bottom:10px"></div>
+      <p class="hint" id="claudeMode"></p>
+      <div id="queue" style="margin-top:12px"></div>
+    </div>
+  </section>
+
+  <section data-panel="config" hidden>
+    <div class="card">
+      <h2>Cấu hình</h2>
+      <p class="hint">Mật khẩu và <span class="mono">CATBOX_USERHASH</span> cố ý không sửa được ở đây — chỉ hiện đã cấu hình hay chưa.</p>
+      <div id="cfg" style="margin-top:12px"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const TOKEN = '__UI_TOKEN__';
+let STATE = null, JOB = null, ES = null, EVENTS = null, T0 = 0, TICK = null;
+let SELECTED = new Set(), FILTER = 'all', QUERY = '';
+let LOGS = { __all: [] }, CURLOG = '__all', ROUTE = '__all', CASE_STATUS = {};
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+function toast(msg, kind = 'ok') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 7000);
+}
+
+async function api(pathname, body) {
+  const res = await fetch(pathname, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'content-type': 'application/json', 'x-fastdo-token': TOKEN },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({ error: 'phản hồi không phải JSON' }));
+  if (!res.ok) throw new Error(data.error || 'HTTP ' + res.status);
+  return data;
+}
+
+// --- danh sách case: ưu tiên cache Sheet, không có thì lùi về file kịch bản ----
+function allCases() {
+  const sheet = STATE.sheet;
+  if (sheet && Array.isArray(sheet.cases) && sheet.cases.length) return sheet.cases;
+  return STATE.cases.map((c) => ({
+    id: c.id, spec: { 'Tiêu đề': c.title }, hasScript: true, rounds: [], nextRound: 1,
+  }));
+}
+
+function specCols() {
+  const sheet = STATE.sheet;
+  if (sheet && Array.isArray(sheet.specColumns)) return sheet.specColumns.filter((l) => l && l !== 'Mã');
+  return ['Tiêu đề'];
+}
+
+function caseById(id) { return allCases().find((c) => c.id === id); }
+
+function visibleCases() {
+  const q = QUERY.trim().toLowerCase();
+  return allCases().filter((c) => {
+    if (FILTER === 'scripted' && !c.hasScript) return false;
+    if (FILTER === 'unscripted' && c.hasScript) return false;
+    if (FILTER === 'never' && (c.rounds || []).length) return false;
+    if (FILTER === 'ran' && !(c.rounds || []).length) return false;
+    if (!q) return true;
+    const hay = [c.id, ...Object.values(c.spec || {})].join(' ').toLowerCase();
+    return q.split(/\s+/).every((t) => hay.includes(t));
+  });
+}
+
+function renderTable() {
+  const cols = specCols();
+  $('#thead').innerHTML =
+    '<tr><th style="width:34px"></th><th style="width:120px">Mã</th>' +
+    cols.map((c) => `<th${c === 'Mô tả' ? ' style="min-width:260px"' : ''}>${esc(c)}</th>`).join('') +
+    '<th style="width:110px">Kịch bản</th><th style="width:150px">Vòng đã chạy</th><th style="width:80px">Vòng kế</th></tr>';
+
+  const rows = visibleCases();
+  $('#tbody').innerHTML = rows.map((c) => {
+    const ran = (c.rounds || []).map((r) => `${r.n}:${r.status}`).join(', ');
+    return `<tr class="${SELECTED.has(c.id) ? 'sel' : ''}" data-id="${esc(c.id)}">
+      <td><input type="checkbox" class="pick" value="${esc(c.id)}"${SELECTED.has(c.id) ? ' checked' : ''} style="width:auto"></td>
+      <td><b class="mono">${esc(c.id)}</b></td>
+      ${cols.map((col) => {
+        const v = (c.spec || {})[col] || '';
+        return col === 'Mô tả' && v.length > 90
+          ? `<td><details><summary class="clip" style="color:var(--ink)">${esc(v.slice(0, 90))}…</summary><pre class="wrapped">${esc(v)}</pre></details></td>`
+          : `<td>${esc(v)}</td>`;
+      }).join('')}
+      <td>${c.hasScript ? '<span class="pill ok">có</span>' : '<span class="pill mute">chưa</span>'}</td>
+      <td class="mono" style="font-size:12px">${esc(ran) || '<span style="color:var(--muted)">—</span>'}</td>
+      <td><span class="pill ${c.nextRoundHasColumn === false ? 'warn' : 'info'}">${esc(c.nextRound || 1)}</span></td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="9" style="padding:20px;text-align:center;color:var(--muted)">Không có case nào khớp bộ lọc.</td></tr>';
+
+  document.querySelectorAll('.pick').forEach((el) => el.addEventListener('change', () => {
+    if (el.checked) SELECTED.add(el.value); else SELECTED.delete(el.value);
+    el.closest('tr').classList.toggle('sel', el.checked);
+    renderPick();
+  }));
+
+  const s = STATE.sheet;
+  $('#sheetInfo').innerHTML = s && s.fetchedAt
+    ? `${allCases().length} case · tab <b>${esc(s.sheetTab)}</b> · lấy lúc ${new Date(s.fetchedAt).toLocaleString('vi-VN')}`
+    : '<b>Chưa có dữ liệu Sheet</b> — bấm "Làm mới từ Sheet" (mở Chrome, ~15s).';
+  renderPick();
+}
+
+function renderPick() {
+  const ids = [...SELECTED];
+  const co = ids.filter((id) => (caseById(id) || {}).hasScript);
+  const chua = ids.filter((id) => !(caseById(id) || {}).hasScript);
+  $('#pickInfo').textContent = ids.length
+    ? `Đã chọn ${ids.length} — ${co.length} có kịch bản, ${chua.length} chưa`
+    : 'Chưa chọn case nào';
+
+  const busy = Boolean(JOB);
+  $('#btnRun').disabled = !co.length || busy;
+  $('#btnDry').disabled = !co.length || busy;
+  $('#btnPlan').disabled = !ids.length || busy;
+  $('#btnClaude').disabled = !chua.length;
+
+  const mode = $('#sheetOn').value;
+  // Chỉ chọn case chưa có kịch bản thì việc đúng là giao Claude, không phải Chạy.
+  $('#btnClaude').classList.toggle('primary', chua.length > 0 && co.length === 0);
+  $('#btnRun').classList.toggle('primary', co.length > 0);
+  $('#btnRun').title = co.length ? '' : 'Mờ vì chưa có case nào được chọn có kịch bản tự động';
+  $('#btnDry').title = $('#btnRun').title;
+
+  $('#planline').innerHTML = !co.length
+    ? (chua.length
+        ? `<b>${chua.length} case chưa có kịch bản</b> nên "Chạy thật" đang mờ — bấm <b>Giao Claude viết kịch bản</b> trước.`
+        : '')
+    : `Chạy <b>${co.length}</b> case — ` + (mode === 'never' ? 'KHÔNG ghi Sheet'
+      : mode === 'always' ? `ghi mọi kết quả vào <b>TEST LẦN ${esc($('#round').value)}</b>`
+      : `chỉ ghi case ĐẠT vào <b>TEST LẦN ${esc($('#round').value)}</b>`)
+      + (chua.length ? ` · bỏ qua ${chua.length} case chưa có kịch bản` : '');
+}
+
+function renderStatus() {
+  const s = STATE, c = s.config, it = [];
+  it.push(s.missing.length ? `<span class="pill bad">Thiếu: ${esc(s.missing.join(', '))}</span>` : '<span class="pill ok">Cấu hình đủ</span>');
+  it.push(c.TARGET_URL ? `<span class="pill info">App: ${esc(c.TARGET_URL)}</span>` : '<span class="pill bad">Chưa có TARGET_URL</span>');
+  it.push(c.SHEET_GID
+    ? `<span class="pill info">Tab: gid ${esc(c.SHEET_GID)}</span>`
+    : c.SHEET_TAB
+      ? `<span class="pill warn">Tab theo tên "${esc(c.SHEET_TAB)}" — nên khai gid</span>`
+      : '<span class="pill bad">Chưa chọn tab</span>');
+  it.push(s.ffmpeg ? '<span class="pill ok">ffmpeg</span>' : '<span class="pill warn">Không có ffmpeg</span>');
+  it.push(s.hasSlot2 ? '<span class="pill ok">Slot 2 sẵn sàng</span>' : '<span class="pill mute">Chưa có slot 2</span>');
+  const cl = s.claude || {};
+  it.push(s.claudeAuto
+    ? `<span class="pill warn">Claude tự chạy: ${esc(cl.model || 'model mặc định')}</span>`
+    : '<span class="pill mute">Claude: hàng đợi</span>');
+  if (s.claudeAuto && !cl.available) it.push('<span class="pill bad">Không tìm thấy lệnh claude</span>');
+  $('#status').innerHTML = `<div class="row">${it.join(' ')}</div>` +
+    (s.sheetUrl ? `<p class="hint">Sheet: <a href="${esc(s.sheetUrl)}" target="_blank" rel="noreferrer">${esc(s.sheetUrl)}</a></p>` : '');
+  $('#account').querySelector('option[value="2"]').disabled = !s.hasSlot2;
+}
+
+// --- log tách theo từng case --------------------------------------------------
+const CASE_MARK = /\[RUNNER\]\s+▶\s+(EVAL_[A-Z0-9_]+)/;
+const PASS_MARK = /\[RUNNER\]\s+Kết quả test:\s*(✅|❌)/;
+
+function resetLogs() {
+  LOGS = { __all: [] }; CURLOG = '__all'; ROUTE = '__all'; CASE_STATUS = {};
+  $('#conclusion').innerHTML = '';
+  renderLogTabs(); renderLog();
+}
+
+function routeLine(entry) {
+  LOGS.__all.push(entry);
+  const m = CASE_MARK.exec(entry.text);
+  if (m) {
+    ROUTE = m[1];
+    if (!LOGS[ROUTE]) { LOGS[ROUTE] = []; CASE_STATUS[ROUTE] = 'running'; renderLogTabs(); }
+  }
+  const r = PASS_MARK.exec(entry.text);
+  if (r && ROUTE !== '__all') { CASE_STATUS[ROUTE] = r[1] === '✅' ? 'pass' : 'fail'; renderLogTabs(); }
+  if (ROUTE !== '__all') LOGS[ROUTE].push(entry);
+  if (CURLOG === '__all' || CURLOG === ROUTE) appendLog(entry);
+}
+
+function renderLogTabs() {
+  const keys = Object.keys(LOGS).filter((k) => k !== '__all');
+  $('#logtabs').innerHTML =
+    `<button class="sm ${CURLOG === '__all' ? 'active' : ''}" data-log="__all">Toàn bộ</button>` +
+    keys.map((k) => {
+      const st = CASE_STATUS[k];
+      const dot = st === 'pass' ? '✓ ' : st === 'fail' ? '✗ ' : '• ';
+      const color = st === 'pass' ? 'color:var(--ok)' : st === 'fail' ? 'color:var(--bad)' : '';
+      return `<button class="sm ${CURLOG === k ? 'active' : ''}" data-log="${esc(k)}" style="${color}">${dot}${esc(k)}</button>`;
+    }).join('');
+  document.querySelectorAll('[data-log]').forEach((b) => b.addEventListener('click', () => {
+    CURLOG = b.dataset.log; renderLogTabs(); renderLog();
+  }));
+}
+
+function appendLog(entry) {
+  const el = document.createElement('div');
+  if (entry.stream === 'err') el.className = 'err';
+  el.textContent = entry.text;
+  $('#log').appendChild(el);
+  $('#log').scrollTop = $('#log').scrollHeight;
+}
+
+/**
+ * `plan` in một dòng máy đọc ở cuối: PLAN_RESULT ready=… missing=… blocked=…
+ * QC không nên phải đọc cả bức tường log mới biết bước kế tiếp là gì.
+ */
+function showConclusion(exitCode) {
+  const line = (LOGS.__all || []).map((l) => l.text).reverse().find((t) => t.startsWith('PLAN_RESULT'));
+  if (!line) {
+    $('#conclusion').innerHTML = exitCode === 0 ? '' :
+      `<div class="card" style="border-color:var(--bad);margin-bottom:12px">
+         <b style="color:var(--bad)">Kết thúc với exit code ${exitCode}</b>
+         <p class="hint">Đọc nhật ký bên dưới để biết vì sao.</p></div>`;
+    return;
+  }
+
+  const pick = (k) => {
+    const m = new RegExp(k + '=(\\S*)').exec(line);
+    const v = m ? m[1] : '-';
+    return v === '-' ? [] : v.split(',').filter(Boolean);
+  };
+  const ready = pick('ready');
+  const missing = pick('missing');
+  const blocked = pick('blocked');
+
+  const parts = [];
+  if (ready.length) {
+    parts.push(`<p><span class="pill ok">Sẵn sàng chạy</span> ${ready.map((r) => {
+      const [id, round] = r.split(':');
+      return `<b>${esc(id)}</b> → vòng ${esc(round)}`;
+    }).join(' · ')}</p>
+    <p class="hint">Quay lại tab <b>Bảng case</b>, bấm <b>Chạy nháp</b> trước, đạt rồi mới <b>Chạy thật</b>.</p>`);
+  }
+  if (missing.length) {
+    parts.push(`<p><span class="pill warn">Chưa có kịch bản</span> <b>${esc(missing.join(', '))}</b></p>
+      <p class="hint">Case chưa có kịch bản tự động thì chưa chạy được — đó là lý do nút "Chạy thật" đang mờ.
+      Bước kế tiếp: bấm nút dưới đây, hoặc quay lại tab <b>Bảng case</b> và bấm <b>Giao Claude viết kịch bản</b>.</p>
+      <div class="row"><button class="primary sm" id="goClaude">Giao Claude viết kịch bản ngay</button></div>`);
+  }
+  if (blocked.length) {
+    parts.push(`<p><span class="pill bad">Bị chặn</span> <b>${esc(blocked.join(', '))}</b></p>
+      <p class="hint">Mã không có trong Sheet, hoặc mẫu dữ liệu case cần đã bị xoá. Đừng chạy.</p>`);
+  }
+
+  $('#conclusion').innerHTML =
+    `<div class="card" style="border-color:var(--accent);margin-bottom:12px">
+       <h2 style="margin:0 0 8px">Kết luận</h2>${parts.join('')}</div>`;
+
+  const btn = $('#goClaude');
+  if (btn) btn.addEventListener('click', () => {
+    SELECTED = new Set(missing);
+    renderTable();
+    launch('/api/claude', { kind: 'write-script', ids: missing, round: Number($('#round').value) || 1, slot: slotDangChon() });
+  });
+}
+
+function renderLog() {
+  $('#log').textContent = '';
+  (LOGS[CURLOG] || []).forEach(appendLog);
+}
+
+// --- theo dõi tiến trình ------------------------------------------------------
+function stopStream() {
+  if (ES) { ES.close(); ES = null; }
+  if (TICK) { clearInterval(TICK); TICK = null; }
+  JOB = null; $('#running').textContent = ''; $('#btnStop').disabled = true;
+  renderPick();
+}
+
+function follow(jobId, label) {
+  // Cùng một job tới từ HAI đường: sự kiện 'job' broadcast (phát trước, lúc
+  // adoptChild) và phản hồi của POST /api/... (đến sau). Không chặn thì mở 2
+  // EventSource cho cùng job: mọi dòng nhân đôi, và cái bị bỏ rơi không ai đóng
+  // cứ tự kết nối lại sau mỗi 'done' — mỗi lần lại phát lại NGUYÊN khung log.
+  // Đó là lý do nhật ký hiện cùng một phiên Claude lặp 3-4 lần.
+  if (JOB === jobId && ES) return;
+  if (ES) { ES.close(); ES = null; }
+  if (TICK) { clearInterval(TICK); TICK = null; }
+
+  JOB = jobId;
+  resetLogs();
+  switchTab('run');
+  $('#running').textContent = label ? 'đang chạy: ' + label : '';
+  $('#btnStop').disabled = false;
+  renderPick();
+  T0 = Date.now();
+  TICK = setInterval(() => { $('#timer').textContent = Math.floor((Date.now() - T0) / 1000) + 's'; }, 500);
+
+  ES = new EventSource(`/api/log/${jobId}?token=${encodeURIComponent(TOKEN)}`);
+  ES.addEventListener('line', (e) => routeLine(JSON.parse(e.data)));
+  ES.addEventListener('done', async (e) => {
+    const { code } = JSON.parse(e.data);
+    routeLine({ stream: code === 0 ? 'out' : 'err', text: `\n── kết thúc, exit code ${code} ──` });
+    stopStream();
+    showConclusion(code);
+    // exit 2 của `plan` nghĩa là "hạ tầng OK nhưng thiếu kịch bản" — đó là thông
+    // tin, không phải lỗi. Báo đỏ ở đây chỉ làm QC hoảng vô cớ.
+    const laKeHoach = (LOGS.__all || []).some((l) => l.text.startsWith('PLAN_RESULT'));
+    if (code === 0) toast('Xong.');
+    else if (laKeHoach && code === 2) toast('Đã đọc Sheet xong — xem phần Kết luận ở trên.');
+    else toast(`Kết thúc với exit code ${code} — đọc nhật ký.`, 'bad');
+    await reload();
+  });
+  ES.onerror = () => {
+    // Server đóng luồng sau sự kiện 'done' — đó là kết thúc bình thường, không
+    // phải mất kết nối. stopStream() đã đặt JOB = null nên dùng nó để phân biệt.
+    if (!JOB) return;
+    routeLine({ stream: 'err', text: '[UI] mất kết nối luồng log' });
+    stopStream();
+  };
+}
+
+async function launch(pathname, body) {
+  try {
+    const r = await api(pathname, body);
+    if (r.queued) { toast('Đã xếp vào hàng đợi cho Claude.'); switchTab('claude'); await reload(); return; }
+    follow(r.jobId, (body && body.ids ? body.ids.join(' ') : '') || pathname);
+  } catch (err) { toast(err.message, 'bad'); }
+}
+
+function scriptedPicked() { return [...SELECTED].filter((id) => (caseById(id) || {}).hasScript); }
+function unscriptedPicked() { return [...SELECTED].filter((id) => !(caseById(id) || {}).hasScript); }
+
+function runBody(extra) {
+  return Object.assign({
+    ids: scriptedPicked(),
+    round: Number($('#round').value) || 1,
+    account: Number($('#account').value) || 1,
+    record: $('#record').value === '1',
+    upload: true,
+    sheetOn: $('#sheetOn').value,
+  }, extra);
+}
+
+// --- lịch sử ------------------------------------------------------------------
+function sheetPill(sh) {
+  if (sh.state === 'written') return `<span class="pill ok">đã ghi ${esc(sh.cell || '')}</span>`;
+  if (sh.state === 'pending') return '<span class="pill warn">chờ duyệt</span>';
+  if (sh.state === 'failed') return '<span class="pill bad">ghi hỏng</span>';
+  return '<span class="pill mute">chưa ghi</span>';
+}
+
+function renderRuns() {
+  if (!STATE.runs.length) { $('#runs').innerHTML = '<p class="hint">Chưa có lần chạy nào.</p>'; return; }
+  $('#runs').innerHTML = STATE.runs.map((r) => {
+    if (r.broken) return `<div class="runitem"><h3>${esc(r.dir)} <span class="pill bad">result.json hỏng</span></h3></div>`;
+    const sh = r.sheet || {};
+    return `<div class="runitem">
+      <h3><span class="mono">${esc(r.testcaseId)}</span> · vòng ${esc(r.round)} · slot ${esc(r.account)}
+        <span class="pill ${r.pass ? 'ok' : 'bad'}">${r.pass ? 'ĐẠT' : 'KHÔNG ĐẠT'}</span>${sheetPill(sh)}
+        <span style="color:var(--muted);font-weight:400;font-size:12.5px">${esc(r.seconds)}s</span></h3>
+      <div class="mono" style="color:var(--muted)">${esc(r.dir)}</div>
+      ${sh.reason ? `<p class="hint">${esc(sh.reason)}</p>` : ''}
+      ${r.videoUrl ? `<p class="hint"><a href="${esc(r.videoUrl)}" target="_blank" rel="noreferrer">Xem video</a></p>` : ''}
+      ${r.resultText ? `<details><summary>Kết quả chi tiết</summary><pre class="wrapped">${esc(r.resultText)}</pre></details>` : ''}
+      <div class="row" style="margin-top:10px">
+        ${sh.state === 'pending' ? `<button class="primary sm" data-commit="${esc(r.dir)}">Ghi vào Sheet</button>
+          <button class="sm" data-dry="${esc(r.dir)}">Xem trước</button>` : ''}
+        ${r.hasFailReport ? `<button class="sm" data-fail="${esc(r.dir)}">Báo cáo chẩn đoán</button>
+          <button class="sm" data-diag="${esc(r.testcaseId)}">Nhờ Claude chẩn đoán</button>` : ''}
+      </div></div>`;
+  }).join('');
+
+  document.querySelectorAll('[data-commit]').forEach((b) => b.addEventListener('click', () => {
+    if (confirm('Ghi kết quả này vào Google Sheet của team?')) launch('/api/commit', { dir: b.dataset.commit });
+  }));
+  document.querySelectorAll('[data-dry]').forEach((b) => b.addEventListener('click', () =>
+    launch('/api/commit', { dir: b.dataset.dry, dry: true })));
+  document.querySelectorAll('[data-diag]').forEach((b) => b.addEventListener('click', () =>
+    launch('/api/claude', { kind: 'diagnose', ids: [b.dataset.diag], slot: slotDangChon() })));
+  document.querySelectorAll('[data-fail]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const { text } = await api('/api/failreport', { dir: b.dataset.fail });
+      switchTab('run'); resetLogs();
+      text.split('\n').forEach((t) => LOGS.__all.push({ stream: 'out', text: t }));
+      renderLog();
+    } catch (err) { toast(err.message, 'bad'); }
+  }));
+}
+
+// --- tài khoản Claude (slot) --------------------------------------------------
+//
+// Mỗi slot là một phiên đăng nhập Claude Code riêng (CLAUDE_CONFIG_DIR riêng).
+// Slot 1 dùng chung tài khoản của cả máy — đăng xuất nó là đụng tới mọi thứ khác
+// đang dùng Claude Code, nên chỗ đó hỏi lại rõ ràng hơn.
+
+/** Slot đang chọn để chạy. Chưa chọn thì lấy slot đầu tiên còn đăng nhập. */
+function slotDangChon() {
+  const sel = $('#cslot');
+  const n = sel ? Number(sel.value) : NaN;
+  if (Number.isInteger(n) && n >= 1) return n;
+  const dau = (STATE.claudeSlots || []).find((s) => s.loggedIn);
+  return dau ? dau.slot : 1;
+}
+
+function moTaSlot(s) {
+  if (s.chuaDoc) return 'đang đọc…';
+  if (!s.loggedIn) return 'chưa đăng nhập';
+  return [s.email, s.orgName, s.subscriptionType].filter(Boolean).join(' · ');
+}
+
+function khungSlot() {
+  const slots = STATE.claudeSlots || [];
+  if (!slots.length) return '';
+  const chon = slotDangChon();
+  const coSan = slots.filter((s) => s.loggedIn).length;
+
+  return `
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+      <div class="row" style="align-items:center">
+        <b>Tài khoản Claude</b>
+        <select id="cslot" style="min-width:210px">
+          ${slots.map((s) => `<option value="${s.slot}" ${s.slot === chon ? 'selected' : ''} ${s.loggedIn ? '' : 'disabled'}>
+              slot ${s.slot} — ${esc(moTaSlot(s))}</option>`).join('')}
+        </select>
+        <button class="sm" id="cslotRefresh" title="Đọc lại trạng thái đăng nhập">⟳ Làm mới</button>
+      </div>
+      <label class="row" style="gap:7px;align-items:center;margin-top:8px;cursor:pointer">
+        <input type="checkbox" id="cswitch" style="width:auto" ${STATE.claudeAutoSwitch ? 'checked' : ''}>
+        <span>Hết hạn mức thì tự chuyển sang slot còn lại</span>
+      </label>
+      <div style="margin-top:8px">
+        ${slots.map((s) => `
+          <div class="row" style="align-items:center;padding:5px 0">
+            <span class="pill ${s.loggedIn ? 'ok' : 'mute'}" style="min-width:64px">slot ${s.slot}</span>
+            <span class="mono" style="color:var(--muted);flex:1">${esc(moTaSlot(s))}</span>
+            ${s.loggedIn
+              ? `<button class="sm" data-logout="${s.slot}">Đăng xuất</button>`
+              : `<button class="sm primary" data-login="${s.slot}">Đăng nhập</button>`}
+          </div>`).join('')}
+      </div>
+      <p class="hint">
+        ${coSan === 0
+          ? 'Chưa slot nào đăng nhập — nút "Giao Claude" sẽ báo lỗi cho tới khi đăng nhập ít nhất một slot.'
+          : `Đang có <b>${coSan}</b> slot dùng được.`}
+        Bấm "Đăng nhập" sẽ mở một cửa sổ dòng lệnh chạy <span class="mono">claude auth login</span> —
+        trang web không đăng nhập hộ được vì bước này bắt buộc mở trình duyệt xác thực.
+        Xong thì quay lại bấm <b>⟳ Làm mới</b>.
+        Slot 1 dùng chung tài khoản Claude Code của cả máy; slot 2 trở đi nằm riêng trong
+        <span class="mono">.claude-auth/</span>.
+      </p>
+    </div>`;
+}
+
+function ganSuKienSlot() {
+  const r = $('#cslotRefresh');
+  if (r) r.addEventListener('click', async () => {
+    r.disabled = true;
+    r.textContent = '⟳ đang đọc…';
+    try { await api('/api/claude/auth', { action: 'refresh' }); await reload(); toast('Đã đọc lại tài khoản.'); }
+    catch (err) { toast(err.message, 'bad'); }
+  });
+
+  const sw = $('#cswitch');
+  if (sw) sw.addEventListener('change', async () => {
+    try { await api('/api/config', { CLAUDE_AUTO_SWITCH: sw.checked ? '1' : '0' }); await reload(); }
+    catch (err) { toast(err.message, 'bad'); sw.checked = !sw.checked; }
+  });
+
+  document.querySelectorAll('[data-login]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const r2 = await api('/api/claude/auth', { action: 'login', slot: Number(b.dataset.login) });
+      toast(`Đã mở cửa sổ đăng nhập cho slot ${r2.slot}. Xong thì bấm ⟳ Làm mới.`);
+    } catch (err) { toast(err.message, 'bad'); }
+  }));
+
+  document.querySelectorAll('[data-logout]').forEach((b) => b.addEventListener('click', async () => {
+    const n = Number(b.dataset.logout);
+    const canh = n === 1
+      ? 'Slot 1 dùng CHUNG tài khoản Claude Code của cả máy này.\nĐăng xuất sẽ ảnh hưởng mọi chỗ khác đang dùng Claude Code, không riêng công cụ test.\n\nVẫn đăng xuất?'
+      : `Đăng xuất slot ${n}?`;
+    if (!confirm(canh)) return;
+    b.disabled = true;
+    try { await api('/api/claude/auth', { action: 'logout', slot: n }); await reload(); toast(`Đã đăng xuất slot ${n}.`); }
+    catch (err) { toast(err.message, 'bad'); b.disabled = false; }
+  }));
+}
+
+// --- hàng đợi Claude ----------------------------------------------------------
+const QPILL = { done: 'ok', running: 'info', pending: 'warn', failed: 'bad', interrupted: 'warn', stopped: 'mute' };
+const QLABEL = {
+  done: 'xong', running: 'đang chạy', pending: 'chờ',
+  failed: 'THẤT BẠI', interrupted: 'đứt giữa chừng', stopped: 'đã dừng',
+};
+
+function renderQueue() {
+  const items = STATE.queue || [];
+  // Chỉ đếm việc THẬT SỰ còn chờ. 'failed'/'interrupted' vẫn hiện trong danh sách
+  // nhưng không nhá huy hiệu mãi mãi.
+  const pending = items.filter((i) => i.status === 'pending' || i.status === 'running');
+  $('#qbadge').innerHTML = pending.length ? `<span class="pill warn">${pending.length}</span>` : '';
+  const cl = STATE.claude || {};
+  const dongLenh = `claude -p --output-format stream-json --verbose --permission-mode bypassPermissions${cl.model ? ' --model ' + esc(cl.model) : ''}`;
+  $('#claudeInfo').innerHTML = `
+    <div class="row">
+      <span class="pill ${cl.available ? 'ok' : 'bad'}">CLI: ${esc(cl.version || 'không tìm thấy')}</span>
+      <span class="pill info">Model: ${esc(cl.model || 'mặc định của Claude Code trên máy này')}</span>
+      <span class="pill ${STATE.claudeAuto ? 'warn' : 'mute'}">${STATE.claudeAuto ? 'Tự chạy' : 'Hàng đợi'}</span>
+    </div>
+    ${STATE.claudeAuto ? `<p class="hint">Lệnh sẽ chạy: <span class="mono">${dongLenh}</span> — câu nhắc truyền qua stdin, không nằm trên dòng lệnh.</p>` : ''}
+    <p class="hint">Đổi model ở tab <b>Cấu hình</b> (để trống = dùng mặc định của máy).</p>
+    ${khungSlot()}`;
+  ganSuKienSlot();
+
+  $('#claudeMode').innerHTML = STATE.claudeAuto
+    ? 'Chế độ <b>tự gọi Claude</b> đang BẬT (<span class="mono">CLAUDE_AUTO_RUN=1</span> trong .env) — bấm là Claude tự chạy.'
+    : 'Chế độ <b>hàng đợi</b>: trang không tự khởi động Claude. Chép câu nhắc bên dưới dán vào phiên chat. '
+      + 'Muốn bấm một nút là xong thì đặt <span class="mono">CLAUDE_AUTO_RUN=1</span> trong <span class="mono">.env</span> — '
+      + 'cố ý chỉ sửa được bằng tay, vì nó cho phép một nút web khởi động agent chạy lệnh trên máy.';
+
+  $('#queue').innerHTML = items.length ? items.map((i) => `
+    <div class="runitem">
+      <h3>${i.kind === 'diagnose' ? 'Chẩn đoán' : 'Viết kịch bản'}
+        <span class="mono">${esc(i.ids.join(', '))}</span>
+        <span class="pill ${QPILL[i.status] || 'warn'}">${esc(QLABEL[i.status] || i.status)}</span>
+        ${i.slot ? `<span class="pill mute">slot ${esc(i.slot)}</span>` : ''}
+        ${i.exitCode !== undefined && i.exitCode !== null && i.exitCode !== 0
+          ? `<span class="pill ${i.status === 'stopped' ? 'mute' : 'bad'}">exit ${esc(i.exitCode)}</span>` : ''}
+        <span style="color:var(--muted);font-weight:400;font-size:12.5px">${new Date(i.createdAt).toLocaleString('vi-VN')}</span></h3>
+      ${i.note ? `<p class="hint" style="color:var(--${i.status === 'failed' ? 'bad' : 'muted'})">${esc(i.note)}</p>` : ''}
+      <pre class="wrapped" style="background:var(--bg);padding:10px;border-radius:7px">${esc(i.prompt)}</pre>
+      <div class="row" style="margin-top:8px">
+        <button class="sm" data-copy="${esc(i.id)}">Chép câu nhắc</button>
+        ${i.status !== 'done' ? `<button class="sm" data-done="${esc(i.id)}">Đánh dấu xong</button>` : ''}
+      </div></div>`).join('') : '<p class="hint">Chưa có việc nào.</p>';
+
+  document.querySelectorAll('[data-copy]').forEach((b) => b.addEventListener('click', async () => {
+    const it = items.find((x) => x.id === b.dataset.copy);
+    try { await navigator.clipboard.writeText(it.prompt); toast('Đã chép câu nhắc.'); }
+    catch { toast('Không chép được — bôi đen rồi copy tay.', 'bad'); }
+  }));
+  document.querySelectorAll('[data-done]').forEach((b) => b.addEventListener('click', async () => {
+    try { await api('/api/queue/resolve', { id: b.dataset.done }); await reload(); }
+    catch (err) { toast(err.message, 'bad'); }
+  }));
+}
+
+// --- cấu hình -----------------------------------------------------------------
+function renderConfig() {
+  const c = STATE.config;
+  const secrets = Object.entries(STATE.secrets)
+    .map(([k, has]) => `<span class="pill ${has ? 'ok' : 'bad'}">${esc(k)}: ${has ? 'có' : 'chưa'}</span>`).join(' ');
+  $('#cfg').innerHTML = `
+    <label class="f"><span>Link Google Sheet (dán cả link cũng được)</span><input id="cSheet" value="${esc(STATE.sheetUrl)}"></label>
+    <label class="f"><span>Tên tab trong Sheet</span><input id="cTab" value="${esc(c.SHEET_TAB)}"></label>
+    <label class="f"><span>ID tab (gid) — số sau "gid=" trên link; dán cả link Sheet ở ô trên là tự điền</span>
+      <input id="cGid" value="${esc(c.SHEET_GID || '')}"></label>
+    <label class="f"><span>Tên người duyệt (lưu vào nhật ký ghi Sheet)</span>
+      <input id="cQc" value="${esc(c.QC_NAME || '')}"></label>
+    <label class="f"><span>TARGET_URL — dev tunnel hiện hành (chỉ nhận https + tên miền trong danh sách cho phép)</span>
+      <input id="cTarget" value="${esc(c.TARGET_URL)}"></label>
+    <div class="row">
+      <label class="f grow"><span>Tên tổ chức chọn sau khi đăng nhập</span><input id="cOrg" value="${esc(c.ORG_NAME)}"></label>
+      <label class="f" style="width:170px"><span>FPS quay video (1–60)</span>
+        <input id="cFps" type="number" min="1" max="60" value="${esc(c.RECORD_FPS || 15)}"></label>
+    </div>
+    <label class="f"><span>Model cho Claude khi chạy từ trang này — để trống = dùng mặc định của máy
+      (alias: opus, sonnet, haiku · hoặc tên đầy đủ: claude-opus-5)</span>
+      <input id="cModel" value="${esc(c.CLAUDE_MODEL || '')}" placeholder="để trống = mặc định"></label>
+    <div class="row"><button id="btnSave" class="primary">Lưu vào .env</button></div>
+    <p class="hint" style="margin-top:14px">Bí mật (chỉ hiện có/không): ${secrets}</p>
+    <p class="hint">Mỗi lần lưu, bản cũ giữ ở <span class="mono">.env.bak</span>. Đổi Sheet xong nhớ bấm "Làm mới từ Sheet".</p>`;
+
+  $('#btnSave').addEventListener('click', async () => {
+    try {
+      const link = $('#cSheet').value;
+      const g = /[#?&]gid=(\d+)/.exec(link);
+      const gidInput = $('#cGid').value.trim();
+      const gid = g && gidInput === (STATE.config.SHEET_GID || '') ? g[1] : gidInput;
+      const d = await api('/api/config', {
+        SHEET_ID: link, SHEET_GID: gid, SHEET_TAB: $('#cTab').value, TARGET_URL: $('#cTarget').value,
+        ORG_NAME: $('#cOrg').value, RECORD_FPS: $('#cFps').value, CLAUDE_MODEL: $('#cModel').value,
+        QC_NAME: $('#cQc').value,
+      });
+      STATE = d.state; renderAll(); toast('Đã lưu: ' + d.updated.join(', '));
+    } catch (err) { toast(err.message, 'bad'); }
+  });
+}
+
+// --- khung --------------------------------------------------------------------
+function switchTab(name) {
+  document.querySelectorAll('.tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
+}
+
+function renderAll() { renderStatus(); renderTable(); renderRuns(); renderQueue(); renderConfig(); }
+
+async function reload() {
+  try { STATE = await api('/api/state'); renderAll(); }
+  catch (err) { toast('Không đọc được trạng thái: ' + err.message, 'bad'); }
+}
+
+document.querySelectorAll('.tabs button').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+document.querySelectorAll('#filters button').forEach((b) => b.addEventListener('click', () => {
+  FILTER = b.dataset.f;
+  document.querySelectorAll('#filters button').forEach((x) => x.classList.toggle('active', x === b));
+  renderTable();
+}));
+$('#q').addEventListener('input', (e) => { QUERY = e.target.value; renderTable(); });
+$('#btnPickAll').addEventListener('click', () => { visibleCases().forEach((c) => SELECTED.add(c.id)); renderTable(); });
+$('#btnPickNone').addEventListener('click', () => { SELECTED.clear(); renderTable(); });
+['round', 'sheetOn'].forEach((id) => $('#' + id).addEventListener('input', renderPick));
+
+$('#btnRefreshSheet').addEventListener('click', () => launch('/api/sheet/refresh', { account: Number($('#account').value) || 1 }));
+$('#btnPlan').addEventListener('click', () => launch('/api/plan', { ids: [...SELECTED], account: Number($('#account').value) || 1 }));
+$('#btnDry').addEventListener('click', () => launch('/api/run', runBody({ record: false, upload: false, sheetOn: 'never' })));
+$('#btnRun').addEventListener('click', () => {
+  const mode = $('#sheetOn').value;
+  const msg = mode === 'never' ? 'Chạy thật (quay video, KHÔNG ghi Sheet)?'
+    : `Chạy thật ${scriptedPicked().length} case và ghi vào TEST LẦN ${$('#round').value} của Google Sheet team?`;
+  if (confirm(msg)) launch('/api/run', runBody());
+});
+$('#btnClaude').addEventListener('click', () => launch('/api/claude', {
+  kind: 'write-script', ids: unscriptedPicked(), round: Number($('#round').value) || 1, slot: slotDangChon(),
+}));
+$('#btnStop').addEventListener('click', async () => {
+  try { await api('/api/stop', { jobId: JOB }); } catch (err) { toast(err.message, 'bad'); }
+});
+
+// --- luồng sự kiện: trang tự cập nhật, không cần F5 --------------------------
+function connectEvents() {
+  EVENTS = new EventSource(`/api/events?token=${encodeURIComponent(TOKEN)}`);
+  EVENTS.addEventListener('state', async (e) => {
+    const { reason } = JSON.parse(e.data);
+    await reload();
+    $('#live').textContent = `cập nhật ${new Date().toLocaleTimeString('vi-VN')}${reason ? ' · ' + reason : ''}`;
+  });
+  EVENTS.addEventListener('job', (e) => {
+    const { jobId, label } = JSON.parse(e.data);
+    if (JOB) return;
+    toast('Có lần chạy mới: ' + label);
+    follow(jobId, label);
+  });
+  EVENTS.addEventListener('hello', (e) => {
+    const { jobs } = JSON.parse(e.data);
+    if (!JOB && jobs.length) follow(jobs[0].jobId, jobs[0].label);
+  });
+  EVENTS.onerror = () => { $('#live').textContent = 'mất kết nối tự cập nhật — tải lại trang'; };
+}
+
+reload().then(connectEvents);
+</script>
+</body>
+</html>

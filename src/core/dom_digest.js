@@ -533,11 +533,20 @@ function ensureDiagnosticsDir() {
   return DIAGNOSTICS_DIR;
 }
 
-/** Ghi digest ra diagnostics/<filename>, trả về đường dẫn tuyệt đối */
+/**
+ * Ghi digest ra file, trả về đường dẫn tuyệt đối.
+ * `opts.dir` trỏ vào thư mục run của lần chạy hiện tại; không có thì về
+ * diagnostics/ như cũ.
+ */
 async function digestToFile(page, filename, opts = {}) {
   const text = await digest(page, opts);
-  ensureDiagnosticsDir();
-  const filePath = path.join(DIAGNOSTICS_DIR, filename);
+  const dir = opts.dir || DIAGNOSTICS_DIR;
+  if (opts.dir) {
+    fs.mkdirSync(dir, { recursive: true });
+  } else {
+    ensureDiagnosticsDir();
+  }
+  const filePath = path.join(dir, filename);
   fs.writeFileSync(filePath, text, 'utf8');
   return { filePath, text };
 }

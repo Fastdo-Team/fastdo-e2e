@@ -1,3 +1,4 @@
+// [ENGINE V1 — PUPPETEER] Từ 2026-09-29 engine v2 (src/engine/, Playwright + Sheets API) không còn gọi file này. Giữ nguyên, không xoá (theo lệ repo).
 // ============================================================================
 // sheet_service.js: Tự động cập nhật Trạng thái + Kết quả thực hiện + link video
 // vào Google Sheet
@@ -9,6 +10,7 @@
 // ============================================================================
 
 const config = require('../config');
+const G = require('./sheet_grid');
 
 // Nhãn ghi vào cột "Trạng thái" của vòng test
 const STATUS_PASS = 'DONE';
@@ -186,19 +188,12 @@ function findRowInGrid(grid, testcaseId) {
  * Kết quả thực hiện (+3), DEV/QC NOTE (+4), Test Date (+5).
  */
 function resolveRoundColumnsFromGrid(grid, roundNumber) {
-  // So khớp CHÍNH XÁC: "TEST LẦN 1" là tiền tố của "TEST LẦN 10"
-  const targetLabel = `TEST LẦN ${roundNumber}`.toUpperCase();
-  const header = grid[0] || [];
-
-  for (let c = 0; c < header.length; c++) {
-    if ((header[c] || '').trim().toUpperCase() === targetLabel) {
-      return {
-        statusCol: colIndexToLetter(c + 1 + 2),
-        resultCol: colIndexToLetter(c + 1 + 3),
-      };
-    }
-  }
-  return null;
+  const cols = G.roundColumns(grid, roundNumber);
+  if (!cols) return null;
+  return {
+    statusCol: colIndexToLetter(cols.statusIdx + 1),
+    resultCol: colIndexToLetter(cols.resultIdx + 1),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -226,30 +221,65 @@ async function findRowByTestcaseId(page, testcaseId, maxRows = 100) {
 }
 
 /**
- * Xác định cột kết quả cho vòng test (Mặc định Lần 1 = cột I)
+ * Đường FALLBACK khi không nạp được lưới CSV: dò dòng 1 qua Name Box để tìm cột
+ * của vòng test. Chậm (~0.7s mỗi ô) nên chỉ chạy khi fetch gviz hỏng.
+ *
+ * Ở đây KHÔNG có nhánh đoán đại nào, và đó là điểm mấu chốt. Bản cũ trả về cột I
+ * khi không tìm thấy nhãn — tức ghi đè thẳng lên Trạng thái và Kết quả của vòng 1
+ * mà chỉ console.warn. Bản cũ còn tắt hẳn việc dò khi roundNumber === 1 (mặc định
+ * cột I), nên Sheet có bố cục khác là ghi sai ngay từ vòng đầu.
  */
-async function resolveResultColumn(page, roundNumber = 1) {
-  if (roundNumber === 1) {
-    return config.SHEET_RESULT_COLUMN || 'I';
-  }
-
-  console.log(`[SHEET] Đang tính toán cột kết quả cho TEST LẦN ${roundNumber}...`);
-  const targetLabel = `TEST LẦN ${roundNumber}`.toUpperCase();
+async function resolveRoundColumnsByScan(page, roundNumber = 1) {
+  console.log(`[SHEET] Đang dò cột của TEST LẦN ${roundNumber} trên dòng 1...`);
+  const seen = [];
 
   for (let c = 1; c <= 40; c++) {
     const colLetter = colIndexToLetter(c);
     await gotoCell(page, `${colLetter}1`);
-    const val = await readCellText(page);
-    if (val && val.toUpperCase().trim() === targetLabel) {
-      const resultColIndex = c + 3;
-      const resultCol = colIndexToLetter(resultColIndex);
-      console.log(`[SHEET] Tìm thấy ${targetLabel} tại cột ${colLetter} -> Cột kết quả là ${resultCol}`);
-      return resultCol;
+    const val = (await readCellText(page)) || '';
+    const m = G.ROUND_LABEL_RE.exec(val.trim());
+    if (!m) continue;
+
+    seen.push(`LẦN ${m[1]} (cột ${colLetter})`);
+    if (parseInt(m[1], 10) !== Number(roundNumber)) continue;
+
+    const statusCol = colIndexToLetter(c + G.STATUS_OFFSET);
+    const resultCol = colIndexToLetter(c + G.RESULT_OFFSET);
+
+    // Chốt cuối: 2 ô sắp ghi phải đúng mang nhãn Trạng thái / Kết quả thực hiện.
+    // Bố cục +2/+3 chỉ là giả định; Sheet khác bố cục mà không chốt thì ghi nhầm
+    // cột trong im lặng.
+    const expect = [
+      [statusCol, G.STATUS_LABEL],
+      [resultCol, G.RESULT_LABEL],
+    ];
+    for (const [col, want] of expect) {
+      await gotoCell(page, `${col}2`);
+      const actual = ((await readCellText(page)) || '').replace(/\s+/g, ' ').trim();
+      if (actual && G.normalizeLabel(actual) !== G.normalizeLabel(want)) {
+        throw new Error(
+          `[AN TOÀN] Ô ${col}2 đang mang nhãn "${actual}", không phải "${want}" — bố cục ` +
+            `vòng ${roundNumber} khác giả định. Dừng lại, không ghi.`
+        );
+      }
     }
+
+    console.log(
+      `[SHEET] TEST LẦN ${roundNumber} tại cột ${colLetter} -> Trạng thái ${statusCol}, Kết quả ${resultCol}`
+    );
+    return { statusCol, resultCol };
   }
 
-  console.warn(`[SHEET] Không tìm thấy nhãn ${targetLabel} ở dòng 1, fallback về cột I`);
-  return 'I';
+  throw new Error(
+    `[AN TOÀN] Không tìm thấy nhãn "TEST LẦN ${roundNumber}" ở dòng 1 (đã dò 40 cột đầu). ` +
+      `Nhãn vòng đọc được: ${seen.length ? seen.join(', ') : '(không có)'}. Dừng lại, không ghi.`
+  );
+}
+
+/** Giữ chữ ký cũ (trả về chữ cái cột Kết quả), nay cũng không còn nhánh đoán đại */
+async function resolveResultColumn(page, roundNumber = 1) {
+  const { resultCol } = await resolveRoundColumnsByScan(page, roundNumber);
+  return resultCol;
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +435,10 @@ async function updateSheetResult(
       );
     }
 
-    // Xác nhận an toàn: đối chiếu lại ô cột ID của dòng đó ngay trên lưới
+    // Đối chiếu sơ bộ trên lưới. LƯU Ý: khi không truyền --row thì targetRow vừa
+    // được suy ra từ CHÍNH ô này, nên phép so dưới đây là tautology và không chặn
+    // được gì — nó chỉ thật sự có tác dụng cho trường hợp --row chỉ định tay.
+    // Chốt thật nằm ở bước đọc sống ngay trước khi ghi, bên dưới.
     const idCol = letterToColIndex(config.SHEET_ID_COLUMN) - 1;
     const actualId = ((grid[targetRow - 1] || [])[idCol] || '').trim();
     if (actualId !== testcaseId.trim()) {
@@ -415,34 +448,68 @@ async function updateSheetResult(
     }
 
     const cols = resolveRoundColumnsFromGrid(grid, roundNumber);
-    if (cols) {
-      statusCol = cols.statusCol;
-      resultCol = cols.resultCol;
+    if (!cols) {
+      const have = G.listRoundNumbers(grid);
+      throw new Error(
+        `[AN TOÀN] Tab "${config.SHEET_TAB}" không có cột nào mang nhãn "TEST LẦN ${roundNumber}". ` +
+          `Sheet đang có vòng: ${have.length ? have.join(', ') : '(không vòng nào)'}. ` +
+          'Dừng lại — thêm cột cho vòng này trước, hoặc chạy vào vòng đã có.'
+      );
     }
-    if (resultCol) {
-      const resultIdx = letterToColIndex(resultCol) - 1;
-      existingResult = (grid[targetRow - 1] || [])[resultIdx] || '';
+
+    const labels = G.checkRoundLabels(grid, roundNumber);
+    if (!labels.ok) {
+      throw new Error(
+        `[AN TOÀN] Bố cục vòng ${roundNumber} không như mong đợi: ${labels.problems.join('; ')}. ` +
+          'Dừng lại, không ghi.'
+      );
     }
+
+    statusCol = cols.statusCol;
+    resultCol = cols.resultCol;
+
+    const resultIdx = letterToColIndex(resultCol) - 1;
+    existingResult = (grid[targetRow - 1] || [])[resultIdx] || '';
   }
 
   // 2. Fallback sang cách dò từng ô nếu không nạp được lưới
   if (!targetRow) {
     targetRow = await findRowByTestcaseId(page, testcaseId);
-    await gotoCell(page, `${config.SHEET_ID_COLUMN}${targetRow}`);
-    const actualId = await readCellText(page);
-    if (actualId.trim() !== testcaseId.trim()) {
-      throw new Error(
-        `[AN TOÀN] Sai dòng! Mong đợi ${config.SHEET_ID_COLUMN}${targetRow} = "${testcaseId}", thực tế = "${actualId}". Dừng lại!`
-      );
-    }
   }
   if (!resultCol) {
-    resultCol = await resolveResultColumn(page, roundNumber);
-    statusCol = colIndexToLetter(letterToColIndex(resultCol) - 1);
+    const scanned = await resolveRoundColumnsByScan(page, roundNumber);
+    statusCol = scanned.statusCol;
+    resultCol = scanned.resultCol;
   }
   if (existingResult === null) {
     await gotoCell(page, `${resultCol}${targetRow}`);
     existingResult = await readCellText(page);
+  }
+
+  // ---------------------------------------------------------------------------
+  // CHỐT SỐNG: đọc thật ô cột A của dòng sắp ghi, trên đúng trang sắp ghi.
+  //
+  // Đây là chốt DUY NHẤT độc lập với nguồn dữ liệu đã dùng để suy ra dòng, và nó
+  // bắt được hai kiểu sai mà mọi chốt trên lưới đều mù:
+  //   1. Lưới gviz có thể là bản cache cũ (xem ghi chú ở bước ghi bên dưới). Sheet
+  //      vừa bị chèn/xoá dòng thì lưới vẫn trả vị trí cũ, và đối chiếu lưới với
+  //      lưới thì luôn khớp.
+  //   2. Ghi đi qua Name Box, mà Name Box luôn trỏ vào SUB-TAB đang hiển thị —
+  //      trong khi lưới lại đọc qua gviz theo TÊN tab. Tab Sheets được tái dùng
+  //      nếu đã mở (không kèm #gid), nên QC để sẵn một sub-tab khác là đọc một
+  //      nơi ghi một nơi.
+  // Giá: 1 lần đọc ô (~0.7s) cho mỗi lần ghi. Đổi lại là lần ghi duy nhất được
+  // xác nhận đúng chỗ trên trang thật.
+  // ---------------------------------------------------------------------------
+  await gotoCell(page, `${config.SHEET_ID_COLUMN}${targetRow}`);
+  const liveId = ((await readCellText(page)) || '').trim();
+  if (liveId !== testcaseId.trim()) {
+    throw new Error(
+      `[AN TOÀN] Sai dòng! Ô ${config.SHEET_ID_COLUMN}${targetRow} trên trang đang mở = ` +
+        `"${liveId}", không phải "${testcaseId}". Nguyên nhân thường gặp: tab Google Sheet ` +
+        `đang hiển thị sub-tab khác "${config.SHEET_TAB}", hoặc Sheet đã chèn/xoá dòng sau ` +
+        'khi lưới được nạp. Dừng lại, không ghi.'
+    );
   }
 
   const resultCell = `${resultCol}${targetRow}`;
@@ -520,6 +587,8 @@ module.exports = {
   readCellText,
   findRowByTestcaseId,
   resolveResultColumn,
+  resolveRoundColumnsByScan,
+  resolveRoundColumnsFromGrid,
   fetchGrid,
   parseCsv,
   updateSheetResult,

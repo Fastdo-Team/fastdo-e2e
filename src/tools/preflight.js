@@ -13,15 +13,19 @@
 // ============================================================================
 
 const fs = require('fs');
-const path = require('path');
 const { spawnSync } = require('child_process');
 const fetch = require('node-fetch');
 const config = require('../config');
-const { initBrowser } = require('../core/browser');
-const { ensureAuthenticated } = require('../core/session');
 const { humanClick } = require('../core/cursor_motion');
+// Engine v2 (Playwright): mở app bằng hồ sơ tài khoản, file phiên .auth/<hồ sơ>.json.
+const { createBrowserPool } = require('../engine/browser_pool');
+const { openAppPage } = require('../engine/app_session');
+const { getProfile, profileForAccount, storagePathOf } = require('../engine/profiles');
 const { waitForSettle } = require('../core/page_ready');
 const H = require('../core/evaluation_helpers');
+const F = require('./lib/fixtures');
+const { openSheet } = require('../sheets');
+const { showSpaces } = require('../sheets/a1');
 
 const results = [];
 
@@ -33,18 +37,13 @@ function record(ok, label, detail, hard = true) {
 }
 
 function checkEnv() {
-  const required = {
-    FASTDO_EMAIL: config.EMAIL,
-    FASTDO_PASSWORD: config.PASSWORD,
-    CATBOX_USERHASH: config.CATBOX_USERHASH,
-    TARGET_URL: config.TARGET_URL,
-    SHEET_ID: config.SHEET_ID,
-  };
-  const missing = Object.keys(required).filter((k) => !required[k]);
+  const missing = config.missingRequired();
   record(
     missing.length === 0,
     'Biến môi trường',
-    missing.length ? `thiếu: ${missing.join(', ')} (xem .env.example)` : 'đủ 5 biến bắt buộc'
+    missing.length
+      ? `thiếu: ${missing.join(', ')} (xem .env.example)`
+      : `đủ ${config.REQUIRED_ENV.length} biến bắt buộc`
   );
 }
 
@@ -55,7 +54,7 @@ function checkFfmpeg() {
     record(
       r.status === 0,
       'ffmpeg trong PATH',
-      r.status === 0 ? line.slice(0, 50) : 'không gọi được — chạy sẽ phải dùng --no-record',
+      r.status === 0 ? line.slice(0, 50) : 'không gọi được — video vẫn quay nhưng không có dải phụ đề bước (giữ webm gốc)',
       false
     );
   } catch (err) {
@@ -63,19 +62,35 @@ function checkFfmpeg() {
   }
 }
 
+const PROFILE_NAME = profileForAccount(config.ACCOUNT);
+
 function checkSessionFile() {
-  const exists = fs.existsSync(config.AUTH_STATE_PATH);
+  const file = storagePathOf({ name: PROFILE_NAME });
+  const exists = fs.existsSync(file);
   let age = '';
   if (exists) {
-    const hours = (Date.now() - fs.statSync(config.AUTH_STATE_PATH).mtimeMs) / 3600000;
-    age = `lưu cách đây ${hours.toFixed(1)} giờ`;
+    const hours = (Date.now() - fs.statSync(file).mtimeMs) / 3600000;
+    age = `hồ sơ ${PROFILE_NAME}, lưu cách đây ${hours.toFixed(1)} giờ`;
   }
   record(
     exists,
-    'File session',
-    exists ? age : 'chưa có .auth/user_state.json — lần chạy đầu sẽ tự đăng nhập',
+    'File phiên đăng nhập',
+    exists ? age : `chưa có .auth/${PROFILE_NAME}.json — lần chạy đầu sẽ tự đăng nhập`,
     false
   );
+}
+
+/** Chrome mở được qua Playwright (không cần tunnel) */
+async function checkChrome() {
+  const pool = createBrowserPool({ headless: true });
+  try {
+    const browser = await pool.get();
+    record(true, 'Chrome (Playwright)', `Chrome ${browser.version()}`);
+  } catch (err) {
+    record(false, 'Chrome (Playwright)', err.message);
+  } finally {
+    await pool.close();
+  }
 }
 
 async function checkTunnel() {
@@ -91,56 +106,18 @@ async function checkTunnel() {
   }
 }
 
-/**
- * Quét hằng số tên mẫu trong các testcase. Không sửa testcase để khai báo
- * `requires` — quét source là cách không xâm lấn để biết case nào phụ thuộc mẫu nào.
- */
-function scanFixtureNames() {
-  const dir = path.join(config.ROOT_DIR, 'src', 'testcases');
-  const wanted = new Map(); // tên mẫu -> [file]
-
-  if (!fs.existsSync(dir)) return wanted;
-
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
-    const src = fs.readFileSync(path.join(dir, file), 'utf8');
-    const re = /(?:DRAFT_)?TEMPLATE_NAME\s*=\s*['"]([^'"]+)['"]/g;
-    let m;
-    while ((m = re.exec(src)) !== null) {
-      const name = m[1];
-      if (!wanted.has(name)) wanted.set(name, []);
-      wanted.get(name).push(file.replace('.test.js', '').toUpperCase());
-    }
-  }
-
-  return wanted;
-}
-
-function readTemplateRows(page) {
-  return page.evaluate(() =>
-    Array.from(document.querySelectorAll('table tbody tr'))
-      .map((tr) => {
-        const tds = tr.querySelectorAll('td');
-        return {
-          name: ((tds[0] || {}).innerText || '').replace(/\s+/g, ' ').trim(),
-          status: ((tds[1] || {}).innerText || '').replace(/\s+/g, ' ').trim(),
-        };
-      })
-      .filter((r) => r.name)
-  );
-}
-
 async function checkAppAndFixtures() {
   let instance = null;
+  let pool = null;
 
   try {
-    instance = await initBrowser();
+    pool = createBrowserPool({ headless: true });
+    instance = await openAppPage(await pool.get(), getProfile(PROFILE_NAME));
     const { page } = instance;
-
-    await ensureAuthenticated(page);
-    record(true, 'Đăng nhập / session', 'vào được app bằng session sẵn có');
+    record(true, 'Đăng nhập / phiên', `vào được app bằng hồ sơ ${PROFILE_NAME}`);
 
     await page.goto(config.TARGET_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    const settle = await waitForSettle(page, 30000);
+    const settle = await waitForSettle(page, 30000, null, config.TARGET_URL);
     record(
       settle.settled,
       'App render được',
@@ -151,7 +128,7 @@ async function checkAppAndFixtures() {
             ' — circuit Blazor có thể chưa kết nối, thử lại'
     );
 
-    const wanted = scanFixtureNames();
+    const wanted = F.scanFixtureNames();
     if (wanted.size === 0) {
       record(true, 'Mẫu sandbox testcase cần', 'không testcase nào khai báo tên mẫu', false);
       return;
@@ -159,37 +136,37 @@ async function checkAppAndFixtures() {
 
     const click = (p, el, o) => humanClick(p || page, el, o);
     await H.openEvaluationTab(page, click, 'template');
-    const rows = await readTemplateRows(page);
+    const rows = await F.readTemplateRows(page);
 
-    for (const [name, cases] of wanted) {
-      const hits = rows.filter((r) => r.name === name);
-      if (hits.length === 0) {
-        record(
-          false,
-          `Mẫu "${name}"`,
-          `KHÔNG còn trên tunnel này → ${cases.join(', ')} sẽ chết ở openDraftByName`
-        );
-      } else if (!hits.some((r) => r.status === 'Nháp')) {
-        record(
-          false,
-          `Mẫu "${name}"`,
-          `có nhưng không mẫu nào ở trạng thái Nháp (đang: ${[
-            ...new Set(hits.map((r) => r.status)),
-          ].join(', ')}) → ${cases.join(', ')} cần mẫu Nháp để bấm Sửa`
-        );
-      } else {
-        record(true, `Mẫu "${name}"`, `có ${hits.length} bản, có Nháp → ${cases.join(', ')} OK`);
-      }
+    for (const r of F.matchFixtures(wanted, rows)) {
+      record(r.ok, `Mẫu "${r.name}"`, r.detail);
     }
 
-    const drafts = rows.filter((r) => r.status === 'Nháp').map((r) => r.name);
+    const drafts = F.listDraftNames(rows);
     if (drafts.length) {
-      console.log(`\n  Mẫu Nháp đang có trên tunnel: ${[...new Set(drafts)].join(' | ')}`);
+      console.log(`
+  Mẫu Nháp đang có trên tunnel: ${drafts.join(' | ')}`);
     }
   } catch (err) {
     record(false, 'Kiểm tra app & fixture', err.message);
   } finally {
     if (instance) await instance.close();
+    if (pool) await pool.close();
+  }
+}
+
+async function checkSheet() {
+  try {
+    const sheet = await openSheet();
+    for (const w of sheet.tab.warnings) record(false, 'Tab Sheet', w, false);
+    const grid = await sheet.readGrid();
+    record(true, 'Google Sheet (API)', `tab "${showSpaces(sheet.tab.title)}" (gid ${sheet.tab.gid}), ${grid.length} dòng`);
+    const canEdit = await sheet.client.canEdit();
+    if (canEdit === true) record(true, 'Quyền ghi Sheet', `service account ${sheet.client.saEmail} có quyền sửa`);
+    else if (canEdit === false) record(false, 'Quyền ghi Sheet', `CHƯA có quyền sửa — Share Sheet quyền Editor cho ${sheet.client.saEmail}`);
+    else record(false, 'Quyền ghi Sheet', 'không kiểm được qua Drive API', false);
+  } catch (err) {
+    record(false, 'Google Sheet (API)', err.message);
   }
 }
 
@@ -199,7 +176,9 @@ async function main() {
   console.log('='.repeat(70));
 
   checkEnv();
+  await checkSheet();
   checkFfmpeg();
+  await checkChrome();
   checkSessionFile();
   await checkTunnel();
 

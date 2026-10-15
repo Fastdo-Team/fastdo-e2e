@@ -16,9 +16,9 @@
 // ============================================================================
 
 const config = require('../config');
-const { initBrowser } = require('../core/browser');
-const { ensureAuthenticated } = require('../core/session');
-const { getOrOpenSheetPage, fetchGrid } = require('../core/sheet_service');
+const { openSheet } = require('../sheets');
+const { showSpaces } = require('../sheets/a1');
+const G = require('../core/sheet_grid');
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -33,79 +33,13 @@ function parseArgs() {
   return opts;
 }
 
-/** Chỉ số cột đầu tiên mang nhãn "TEST LẦN n" ở dòng 1 - mốc chia đặc tả / kết quả */
-function findFirstRoundColumn(headerRow) {
-  for (let c = 0; c < headerRow.length; c += 1) {
-    if (/^TEST\s+LẦN\s+\d+$/i.test((headerRow[c] || '').trim())) return c;
-  }
-  return headerRow.length;
-}
-
-// Bố cục cố định của mỗi vòng test, tính từ cột mang nhãn "TEST LẦN n".
-// Dùng làm nhãn dự phòng vì vài cột (Test Date) để trống ở dòng 2.
-const ROUND_LAYOUT = [
-  'Ưu tiên',
-  'Môi trường',
-  'Trạng thái',
-  'Kết quả thực hiện',
-  'DEV/QC NOTE',
-  'Test Date',
-];
-
-/** Cột mang nhãn "TEST LẦN n" gần nhất về bên trái của cột c (-1 nếu chưa có) */
-function roundStartOf(grid, c) {
-  const header = grid[0] || [];
-  let start = -1;
-  for (let i = 0; i <= c && i < header.length; i += 1) {
-    if (/^TEST\s+LẦN\s+\d+$/i.test((header[i] || '').trim())) start = i;
-  }
-  return start;
-}
-
-/** Nhóm vòng test mà cột c thuộc về, để biết "Trạng thái" này là của LẦN mấy */
-function roundOf(grid, c) {
-  const start = roundStartOf(grid, c);
-  return start === -1 ? '' : ((grid[0] || [])[start] || '').trim().toUpperCase();
-}
-
-/**
- * Nhãn của cột c: ưu tiên dòng 2 (tên cột) → bố cục vòng test → dòng 1 → số cột.
- */
-function columnLabel(grid, c) {
-  const sub = ((grid[1] || [])[c] || '').replace(/\s+/g, ' ').trim();
-  if (sub) return sub;
-
-  const start = roundStartOf(grid, c);
-  if (start !== -1 && ROUND_LAYOUT[c - start]) return ROUND_LAYOUT[c - start];
-
-  const group = ((grid[0] || [])[c] || '').replace(/\s+/g, ' ').trim();
-  return group || `cột ${c + 1}`;
-}
-
-function printSpec(grid, rowIdx, firstRoundCol) {
+function printSpec(grid, rowIdx) {
   console.log('');
   console.log('-'.repeat(74));
   console.log('  ĐẶC TẢ CASE (theo Sheet)');
   console.log('-'.repeat(74));
 
-  const row = grid[rowIdx];
-  let printed = 0;
-
-  for (let c = 0; c < firstRoundCol; c += 1) {
-    const value = (row[c] || '').trim();
-    if (!value) continue;
-    printed += 1;
-    const label = columnLabel(grid, c);
-    // Giá trị nhiều dòng thì thụt lề cho dễ đọc, không nhồi vào 1 dòng
-    if (value.includes('\n')) {
-      console.log(`\n${label}:`);
-      value.split('\n').forEach((l) => console.log(`    ${l.trim()}`));
-    } else {
-      console.log(`${label}: ${value}`);
-    }
-  }
-
-  if (printed === 0) console.log('(mọi cột đặc tả đều rỗng - kiểm tra lại tab Sheet)');
+  G.printSpec(G.readSpec(grid, rowIdx));
 }
 
 function printRounds(grid, rowIdx, firstRoundCol, opts) {
@@ -121,8 +55,8 @@ function printRounds(grid, rowIdx, firstRoundCol, opts) {
     const value = (row[c] || '').trim();
     if (!value) continue;
 
-    const round = roundOf(grid, c);
-    const label = columnLabel(grid, c);
+    const round = G.roundOf(grid, c);
+    const label = G.columnLabel(grid, c);
     const wantThisRound = opts.round ? round === `TEST LẦN ${opts.round}`.toUpperCase() : false;
     const showFull = opts.full || wantThisRound;
 
@@ -145,7 +79,7 @@ async function main() {
   const opts = parseArgs();
 
   console.log('='.repeat(74));
-  console.log('  CASE INFO — đọc mô tả testcase từ Google Sheet');
+  console.log('  CASE INFO — đọc mô tả testcase từ Google Sheet (qua API, không mở Chrome)');
   console.log('='.repeat(74));
 
   if (!opts.testcaseId) {
@@ -154,43 +88,20 @@ async function main() {
     return;
   }
 
-  let instance = null;
-
   try {
-    instance = await initBrowser();
-    const { browser, page } = instance;
-
-    await ensureAuthenticated(page);
-
-    const sheetPage = await getOrOpenSheetPage(browser);
-    const grid = await fetchGrid(sheetPage);
-
-    if (!grid) {
-      throw new Error(
-        'Không nạp được lưới Sheet qua CSV gviz. Kiểm tra SHEET_ID / SHEET_TAB trong .env ' +
-          'và quyền truy cập của tài khoản đang đăng nhập.'
-      );
-    }
-
-    const idCol = 0; // config.SHEET_ID_COLUMN = 'A'
-    let rowIdx = -1;
-    for (let r = 1; r < grid.length; r += 1) {
-      if ((grid[r][idCol] || '').trim() === opts.testcaseId) {
-        rowIdx = r;
-        break;
-      }
-    }
+    const sheet = await openSheet();
+    sheet.tab.warnings.forEach((w) => console.warn(`[SHEET] ⚠ ${w}`));
+    const grid = await sheet.readGrid();
+    const tabName = showSpaces(sheet.tab.title);
+    const rowIdx = G.findRowIndex(grid, opts.testcaseId);
 
     if (rowIdx === -1) {
-      const available = grid
-        .slice(1)
-        .map((r) => (r[idCol] || '').trim())
-        .filter((v) => /^EVAL_/i.test(v));
-      // Sheet có ~120 mã; in hết ra 1 dòng là rác. Chỉ gợi ý mã gần giống.
+      const available = G.listCaseIds(grid);
+      // Sheet có hàng trăm mã; in hết ra 1 dòng là rác. Chỉ gợi ý mã gần giống.
       const prefix = opts.testcaseId.replace(/\d+$/, '');
-      const near = available.filter((v) => v.startsWith(prefix)).slice(0, 12);
-      console.error(`\n[ERROR] Không thấy "${opts.testcaseId}" ở cột A của tab "${config.SHEET_TAB}".`);
-      console.error(`        Sheet đang có ${available.length} mã, từ ${available[0]} tới ${available[available.length - 1]}.`);
+      const near = available.filter((v) => v.toUpperCase().startsWith(prefix)).slice(0, 12);
+      console.error(`\n[ERROR] Không thấy "${opts.testcaseId}" ở cột A của tab "${tabName}".`);
+      console.error(`        Tab đang có ${available.length} mã, từ ${available[0]} tới ${available[available.length - 1]}.`);
       if (near.length) {
         console.error(`        Cùng tiền tố "${prefix}": ${near.join(', ')}${available.length > near.length ? ' …' : ''}`);
       }
@@ -198,10 +109,10 @@ async function main() {
       return;
     }
 
-    const firstRoundCol = findFirstRoundColumn(grid[0] || []);
-    console.log(`[CASE] ${opts.testcaseId} — dòng ${rowIdx + 1} của tab "${config.SHEET_TAB}"`);
+    const firstRoundCol = G.findFirstRoundColumn(grid[0] || []);
+    console.log(`[CASE] ${opts.testcaseId} — dòng ${rowIdx + 1} của tab "${tabName}" (gid ${sheet.tab.gid})`);
 
-    printSpec(grid, rowIdx, firstRoundCol);
+    printSpec(grid, rowIdx);
     printRounds(grid, rowIdx, firstRoundCol, opts);
 
     console.log('');
@@ -211,8 +122,6 @@ async function main() {
   } catch (error) {
     console.error(`\n[CASE INFO] Thất bại: ${error.message}`);
     process.exitCode = 1;
-  } finally {
-    if (instance) await instance.close();
   }
 }
 

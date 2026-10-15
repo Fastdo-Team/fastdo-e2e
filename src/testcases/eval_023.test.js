@@ -25,16 +25,20 @@ module.exports = {
   id: 'EVAL_023',
   title: 'ManageConfig truy cập đầy đủ Kỳ đánh giá và Thiết lập',
   targetPath: '/evaluation',
+  // Engine v2: chỉ đọc, không đổi dữ liệu nào → chạy song song an toàn.
+  profile: 'default',
+  parallel: true,
 
   getTargetUrl() {
     return new URL(this.targetPath, config.TARGET_URL).toString();
   },
 
   async run(ctx) {
-    const { page, click } = ctx;
+    const { page, click, mark } = ctx;
     const checks = [];
 
     // Bước 1: Tab "Kỳ đánh giá"
+    mark('B1 Tab Kỳ đánh giá');
     console.log('[TEST] Mở tab "Kỳ đánh giá"');
     await page.goto(this.getTargetUrl(), { waitUntil: 'domcontentloaded', timeout: 30000 });
     await H.waitFor(page, () => document.body.innerText.includes('Kỳ đánh giá'), null, 25000);
@@ -54,6 +58,7 @@ module.exports = {
 
     // Bước 2: 3 mục con của "Thiết lập"
     for (const s of SETTING_TABS) {
+      mark(`B2 Thiết lập > ${s.label}`);
       console.log(`[TEST] Mở Thiết lập > ${s.label}`);
       const url = new URL(`/evaluation?tab=${s.tab}`, config.TARGET_URL).toString();
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
@@ -61,8 +66,9 @@ module.exports = {
       await H.dismissPushPopup(page, click);
       await H.sleep(600);
 
+      // Playwright chỉ truyền 1 tham số vào trang — gộp thành mảng
       const info = await page.evaluate(
-        (createLabel, blockedSrc) => {
+        ([createLabel, blockedSrc]) => {
           const t = document.body.innerText;
           return {
             url: location.href,
@@ -71,8 +77,7 @@ module.exports = {
             rowCount: document.querySelectorAll('tbody tr').length,
           };
         },
-        s.createLabel,
-        BLOCKED_PATTERN.source
+        [s.createLabel, BLOCKED_PATTERN.source]
       );
       checks.push({ name: s.label, ...info, ok: info.hasCreate && !info.blocked });
       console.log(`[TEST] ${s.label}:`, JSON.stringify(info));

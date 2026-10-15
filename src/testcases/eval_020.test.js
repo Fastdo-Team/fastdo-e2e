@@ -20,21 +20,27 @@ module.exports = {
   id: 'EVAL_020',
   title: 'Không cho tiêu chí trùng lặp trong cùng 1 nhóm',
   targetPath: '/evaluation?tab=template',
+  // Engine v2: hồ sơ tài khoản + chạy được song song (mẫu Nháp dùng chung được tự khoá
+  // theo DRAFT_TEMPLATE_NAME, nên 017/019/020 không bao giờ chạy cùng lúc).
+  profile: 'default',
+  parallel: true,
 
   getTargetUrl() {
     return new URL(this.targetPath, config.TARGET_URL).toString();
   },
 
   async run(ctx) {
-    const { page, click, waitXPath } = ctx;
+    const { page, click, waitXPath, mark } = ctx;
 
     // Bước 0-1: Mở mẫu Nháp sandbox
+    mark('B1 Mở mẫu Nháp ở chế độ Sửa');
     console.log('[TEST] Mở danh sách Mẫu đánh giá');
     await H.openEvaluationTab(page, click, 'template');
     console.log(`[TEST] Mở mẫu Nháp "${DRAFT_TEMPLATE_NAME}" ở chế độ Sửa`);
     await H.openDraftByName(page, click, waitXPath, DRAFT_TEMPLATE_NAME);
 
     // Bước 2: Tìm nhóm đã có sẵn tiêu chí
+    mark('B2 Tìm nhóm đã có tiêu chí');
     const cards = await H.readGroupCards(page);
     console.log('[TEST] Cấu trúc hiện tại:', JSON.stringify(cards));
     const target = cards.find((c) => !c.isEmpty && c.criteria.length > 0);
@@ -47,6 +53,7 @@ module.exports = {
     console.log(`[TEST] Nhóm "${target.name}" đang có tiêu chí:`, JSON.stringify(existingNames));
 
     // Bước 3: Mở modal "Chọn tiêu chí" và xem danh sách được chào ra
+    mark('B3 Mở "Chọn tiêu chí" của chính nhóm đó');
     console.log('[TEST] Thao tác: Bấm "+ Thêm tiêu chí" trong chính nhóm đó');
     const options = await H.openCriterionPicker(page, click, target.index);
     console.log('[TEST] Danh sách tiêu chí modal cho chọn:', JSON.stringify(options));
@@ -67,6 +74,7 @@ module.exports = {
     await H.closeCriterionPicker(page, click);
 
     // Bước 4: Xác nhận mẫu không bị đụng chạm gì
+    mark('B4 Mẫu vẫn Nháp');
     const status = await H.readTemplateStatus(page);
     const stillDraft = status === 'Nháp';
     console.log('[TEST] Trạng thái mẫu sau thao tác:', status);

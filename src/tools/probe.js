@@ -72,6 +72,30 @@ function slugify(target, setupFile) {
   return `probe_${base}${suffix}.txt`;
 }
 
+/**
+ * Mọi bước trong probe (goto/waitForSettle/digest) đều tự khai có hạn chờ riêng,
+ * nhưng nếu một bước nào đó trong tương lai không tự bảo vệ được (hoặc CDP tự
+ * treo ở tầng dưới — đã gặp thật: page.evaluate() không tự bung dù
+ * protocolTimeout đặt 90s), lệnh vẫn phải TỰ CHẾT thay vì treo mãi. Không có
+ * watchdog thì người dùng chỉ có cách tự vào Task Manager tìm và giết tiến
+ * trình — đúng thứ đã xảy ra thật, khiến QC nhìn thấy Chrome trắng trơn không rõ
+ * lý do và nút "Dừng" trên giao diện không có gì để hiểu là phải dừng cái gì.
+ */
+function withWatchdog(promise, timeoutMs) {
+  let timer;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      console.error('');
+      console.error(`[PROBE] ✗ TỰ HUỶ sau ${(timeoutMs / 1000).toFixed(0)}s — probe treo, không rõ ở bước nào.`);
+      console.error('        Nguyên nhân thường gặp: session .auth/user_state.json đã cũ (kiểm tra tuổi file),');
+      console.error('        hoặc trang app đang trong trạng thái dở dang chưa từng gặp.');
+      console.error('        Dọn Chrome còn sót lại (nếu có):  npm run chrome:kill');
+      reject(new Error(`probe treo quá ${(timeoutMs / 1000).toFixed(0)}s`));
+    }, timeoutMs);
+  });
+  return Promise.race([promise, guard]).finally(() => clearTimeout(timer));
+}
+
 async function main() {
   const opts = parseArgs();
   const url = resolveUrl(opts.target);
@@ -83,7 +107,7 @@ async function main() {
 
   let browserInstance = null;
 
-  try {
+  async function run() {
     browserInstance = await initBrowser();
     const { browser, page } = browserInstance;
 
@@ -99,7 +123,7 @@ async function main() {
       throw err;
     }
 
-    const settle = await waitForSettle(page, opts.wait, opts.waitText);
+    const settle = await waitForSettle(page, opts.wait, opts.waitText, url);
     console.log(
       `[PROBE] DOM ${settle.settled ? 'đã ổn định' : 'CHƯA ổn định (hết hạn chờ)'} ` +
         `sau ${settle.seconds.toFixed(1)}s — ${settle.count} element tương tác` +
@@ -161,12 +185,26 @@ async function main() {
     console.log('-'.repeat(70));
     console.log(`[PROBE] Digest đầy đủ: ${path.relative(config.ROOT_DIR, filePath)}`);
     console.log('-'.repeat(70));
+  }
+
+  let timedOut = false;
+
+  try {
+    await withWatchdog(run(), 90000);
   } catch (error) {
     console.error(`\n[PROBE] Thất bại: ${error.message}`);
     process.exitCode = 1;
+    timedOut = /probe treo quá/.test(error.message);
   } finally {
-    if (browserInstance) {
-      if (opts.keepOpen) {
+    if (browserInstance && !timedOut) {
+      // CDP còn phản hồi bình thường (không phải nhánh watchdog) — dọn như cũ.
+      // --keep-open chỉ giữ được Chrome mà probe NỐI vào (đã mở sẵn ở cổng debug). Chrome do chính probe khởi chạy là
+      // tiến trình con của node: chỉ ngắt kết nối thì node không bao giờ thoát và lệnh treo mãi (gặp khi agent AI-QC
+      // gọi probe, 2026-10-14) — trường hợp đó đóng Chrome như khi không có cờ.
+      if (opts.keepOpen && !browserInstance.isConnected) {
+        console.log('[PROBE] Bỏ qua --keep-open: Chrome do probe tự mở (chưa có Chrome ở cổng debug) — đóng như thường');
+      }
+      if (opts.keepOpen && browserInstance.isConnected) {
         // Đóng tab probe nhưng giữ Chrome sống: lần probe sau sẽ NỐI vào port
         // 9222 (~0.5s) thay vì khởi chạy lại (~3s). Tab vẫn phải đóng, không thì
         // tab tích luỹ dần đúng như hồi phải viết close_stale_tabs.js.
@@ -180,7 +218,20 @@ async function main() {
       } else {
         await browserInstance.close();
       }
+    } else if (browserInstance && timedOut) {
+      // Watchdog bắn nghĩa là CDP CHÍNH LÀ nghi phạm — page.close()/browser.close()
+      // dùng lại đúng kênh đó nên có thể treo tiếp, kéo theo tiến trình không bao
+      // giờ tự thoát được (đúng lỗi ban đầu, chỉ dời sang chỗ khác). Cho chính
+      // bước dọn 5 giây, không hơn; treo thì bỏ, để `npm run chrome:kill` xử lý
+      // Chrome còn sót lại sau đó.
+      await Promise.race([
+        browserInstance.close().catch(() => {}),
+        new Promise((r) => setTimeout(r, 5000)),
+      ]);
     }
+    // watchdog bắn thì run() có thể còn treo đâu đó (JS không huỷ được 1 await
+    // đang chờ) — đừng để tiến trình giữ terminal mãi vì một promise mồ côi.
+    if (timedOut) process.exit(process.exitCode);
   }
 }
 

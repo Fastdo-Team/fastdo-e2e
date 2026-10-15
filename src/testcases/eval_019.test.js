@@ -19,21 +19,27 @@ module.exports = {
   id: 'EVAL_019',
   title: 'Chặn kích hoạt khi Trọng số nhóm = 0',
   targetPath: '/evaluation?tab=template',
+  // Engine v2: hồ sơ tài khoản + chạy được song song (mẫu Nháp dùng chung được tự khoá
+  // theo DRAFT_TEMPLATE_NAME, nên 017/019/020 không bao giờ chạy cùng lúc).
+  profile: 'default',
+  parallel: true,
 
   getTargetUrl() {
     return new URL(this.targetPath, config.TARGET_URL).toString();
   },
 
   async run(ctx) {
-    const { page, click, waitXPath } = ctx;
+    const { page, click, waitXPath, mark } = ctx;
 
     // Bước 0-1: Mở mẫu Nháp sandbox
+    mark('B1 Mở mẫu Nháp ở chế độ Sửa');
     console.log('[TEST] Mở danh sách Mẫu đánh giá');
     await H.openEvaluationTab(page, click, 'template');
     console.log(`[TEST] Mở mẫu Nháp "${DRAFT_TEMPLATE_NAME}" ở chế độ Sửa`);
     await H.openDraftByName(page, click, waitXPath, DRAFT_TEMPLATE_NAME);
 
     // Bước 2: Chuẩn hoá - bỏ hết nhóm rỗng để lỗi duy nhất là trọng số = 0
+    mark('B2 Chuẩn hoá: bỏ nhóm rỗng');
     let cards = await H.readGroupCards(page);
     console.log('[TEST] Cấu trúc ban đầu:', JSON.stringify(cards));
     if (cards.some((c) => c.isEmpty)) {
@@ -52,6 +58,7 @@ module.exports = {
     console.log(`[TEST] Nhóm mục tiêu "${target.name}", trọng số hiện tại = ${originalWeight}`);
 
     // Bước 3: Điền Trọng số nhóm = 0
+    mark('B3 Điền Trọng số nhóm = 0');
     console.log('[TEST] Thao tác: Điền Trọng số nhóm = 0');
     await H.setGroupWeight(page, target.index, 0);
     const afterSet = await H.readGroupCards(page);
@@ -62,6 +69,7 @@ module.exports = {
     }
 
     // Bước 4: Bấm Kích hoạt
+    mark('B4 Bấm Kích hoạt');
     console.log('[TEST] Thao tác: Bấm nút "Kích hoạt"');
     const act = await H.clickActivate(page, click, waitXPath);
     const blocked = act.blocked;
@@ -71,6 +79,7 @@ module.exports = {
     console.log('[TEST] Nội dung banner lỗi:', errorLine);
 
     // Bước 5: Verify độc lập - reload xem mẫu còn Nháp không
+    mark('B5 Reload — mẫu vẫn Nháp');
     console.log('[TEST] Verify độc lập: Reload kiểm tra trạng thái mẫu...');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await H.waitFor(
@@ -86,6 +95,7 @@ module.exports = {
     console.log('[TEST] Trạng thái sau reload:', status);
 
     // Bước 6: Dọn dẹp - trả Trọng số nhóm về giá trị cũ
+    mark('B6 Dọn dẹp: trả trọng số cũ');
     try {
       const now = await H.readGroupCards(page);
       const again = now.find((c) => c.name === target.name && !c.isEmpty) || now.find((c) => !c.isEmpty);

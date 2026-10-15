@@ -126,10 +126,46 @@ function guessFailedSelector(message) {
  * CỐ Ý hedge: chỉ nói "hướng xử lý", không khẳng định fix - đoán chắc rồi sai
  * còn tốn thời gian hơn là nói thật rằng chưa phân loại được.
  */
-function classifyFailure({ errorMessage, collector, domText, verdict }) {
+function classifyFailure({ errorMessage, collector, domText, verdict, bodyText }) {
   const msg = String(errorMessage || '');
   const failedRequests = (collector && collector.failedRequests) || [];
   const consoleErrors = (collector && collector.consoleErrors) || [];
+
+  // Ba hạng của engine v2 — xếp trước: chúng không phải lỗi app, không phải lỗi selector.
+  if (/HỢP ĐỒNG KỊCH BẢN/.test(msg)) {
+    return {
+      kind: 'HỢP ĐỒNG KỊCH BẢN',
+      hint:
+        'Kịch bản vi phạm hợp đồng (pass không phải boolean, có phép kiểm ✗ mà pass = true, hoặc dùng cú ' +
+        'pháp Puppeteer trên Playwright). Sửa kịch bản — đây KHÔNG phải kết quả kiểm thử.',
+    };
+  }
+  if (/ĐĂNG NHẬP HỒ SƠ .+ THẤT BẠI/.test(msg)) {
+    return {
+      kind: 'ĐĂNG NHẬP HỒ SƠ THẤT BẠI',
+      hint: 'Không đăng nhập được bằng hồ sơ này — kiểm email / mật khẩu / tổ chức trong .env, hoặc tunnel đã đổi URL.',
+    };
+  }
+  if (/đăng nhập ở một nơi khác|Mã xác thực được gửi đến/i.test(String(bodyText || ''))) {
+    return {
+      kind: 'PHIÊN BỊ APP CHẶN',
+      hint:
+        'App báo tài khoản đăng nhập ở nơi khác / đòi mã xác thực — app đã bật lại chặn đăng nhập song ' +
+        'song. Giảm số luồng (PARALLEL=1) cho hồ sơ này. Chạy lại không tự khỏi.',
+    };
+  }
+
+  // Mọi bước chạy trót lọt và kịch bản tự kết luận không đạt → kết quả nghiệp vụ. Xét TRƯỚC lớp phủ: khi thao tác
+  // trong 1 popup (modal), digest đánh dấu gần hết trang nền là "bị che" dù click trong popup vẫn đúng — P0 AI-QC
+  // ticket 1295 (14/10/2026) từng bị báo nhầm "LỚP PHỦ CHẶN CLICK" như vậy.
+  if (!msg && verdict === 'FAIL') {
+    return {
+      kind: 'KẾT QUẢ NGHIỆP VỤ KHÔNG ĐẠT',
+      hint:
+        'Test chạy trót lọt và kết luận không đạt. Đọc "Kết quả test" ở trên: nếu đúng thì đây ' +
+        'là bug app cần báo, KHÔNG sửa test cho nó pass.',
+    };
+  }
 
   // Lớp phủ chặn click: xét trước cả "không tìm thấy", vì triệu chứng của nó
   // thường LÀ "không tìm thấy" hoặc "bấm mà không có gì xảy ra".
@@ -145,14 +181,15 @@ function classifyFailure({ errorMessage, collector, domText, verdict }) {
     };
   }
 
-  if (/Protocol error|Target closed|Session closed|detached|Execution context was destroyed/i.test(msg)) {
+  // "has been closed" = cách Playwright báo tab/context/Chrome bị đóng giữa chừng.
+  if (/Protocol error|Target closed|Session closed|detached|Execution context was destroyed|has been closed/i.test(msg)) {
     return {
       kind: 'HẠ TẦNG CDP',
       hint: 'Mất kết nối CDP / tab bị đóng giữa chừng. Không phải lỗi của app, chạy lại case.',
     };
   }
 
-  if (/Watchdog|vượt quá \d+s|Navigation timeout|timeout of \d+ms/i.test(msg)) {
+  if (/Watchdog|vượt quá \d+s|Navigation timeout|timeout of \d+ms|Timeout \d+ms exceeded/i.test(msg)) {
     return {
       kind: 'HẾT HẠN CHỜ',
       hint:
@@ -200,15 +237,6 @@ function classifyFailure({ errorMessage, collector, domText, verdict }) {
     };
   }
 
-  if (!msg && verdict === 'FAIL') {
-    return {
-      kind: 'KẾT QUẢ NGHIỆP VỤ KHÔNG ĐẠT',
-      hint:
-        'Test chạy trót lọt và kết luận không đạt. Đọc "Kết quả test" ở trên: nếu đúng thì đây ' +
-        'là bug app cần báo, KHÔNG sửa test cho nó pass.',
-    };
-  }
-
   return { kind: 'CHƯA PHÂN LOẠI ĐƯỢC', hint: 'Đọc nhật ký bước + digest DOM bên dưới.' };
 }
 
@@ -246,8 +274,13 @@ async function writeFailReport(p) {
     lines.push('');
 
     let dom = null;
+    let bodyText = '';
     if (p.page) {
       dom = await digestRowsOnly(p.page, { limit: 40 });
+      // Chữ trên trang (cắt ngắn) chỉ để phân loại — bắt popup "đăng nhập ở nơi khác".
+      bodyText = await p.page
+        .evaluate(() => (document.body ? document.body.innerText.slice(0, 5000) : ''))
+        .catch(() => '');
     }
 
     lines.push(`URL cuối: ${(dom && dom.url) || '(không đọc được)'}`);
@@ -262,7 +295,10 @@ async function writeFailReport(p) {
       collector: p.collector,
       domText: dom && dom.text,
       verdict: p.verdict,
+      bodyText,
     });
+    // Engine v2 lưu chẩn đoán vào result.json để giao diện hiện được, không phải mở file này.
+    if (p.diagnosisOut) p.diagnosisOut.diagnosis = { kind: cls.kind, hint: cls.hint };
     lines.push('');
     lines.push(`## Chẩn đoán: ${cls.kind}`);
     lines.push(cls.hint);
@@ -275,7 +311,7 @@ async function writeFailReport(p) {
             `${s.ok ? '✓' : '✗'} ${s.label.padEnd(38)} ${s.seconds.toFixed(1)}s` +
             (s.ok ? '' : '   ← chết ở đây')
         ),
-        '(testcase này chưa dùng ctx.step() - xem bảng thời gian ở cuối log terminal)'
+        '(testcase này chưa dùng ctx.mark() / ctx.step() - xem bảng thời gian ở cuối log terminal)'
       )
     );
 
@@ -301,15 +337,40 @@ async function writeFailReport(p) {
     lines.push(dom ? dom.text : '(không đọc được DOM)');
     lines.push('```');
 
+    if (p.tracePath) {
+      // Trace chỉ được ghi xong SAU báo cáo này (khi đóng context) — ghi đường dẫn trước.
+      lines.push('');
+      lines.push(
+        `Trace: ${path.relative(path.join(__dirname, '..', '..'), p.tracePath)} — xem từng bước + DOM: ` +
+          `npx playwright-core show-trace "${p.tracePath}"`
+      );
+    }
+
     if (p.videoPath && fs.existsSync(p.videoPath)) {
       lines.push('');
       lines.push(`Video: ${path.relative(path.join(__dirname, '..', '..'), p.videoPath)}`);
     }
 
+    const body = lines.join('\n') + '\n';
+
+    // Bản "mới nhất" ở diagnostics/ giữ nguyên vì SKILL.md và thói quen đang trỏ
+    // tới đó. Bản trong thư mục run mới là bản không bị lần chạy sau ghi đè —
+    // chạy lại một case từng xoá sạch bằng chứng của lần trước.
     ensureDiagnosticsDir();
-    const filePath = path.join(DIAGNOSTICS_DIR, `${p.testcaseId}.fail.md`);
-    fs.writeFileSync(filePath, lines.join('\n') + '\n', 'utf8');
-    return filePath;
+    const latestPath = path.join(DIAGNOSTICS_DIR, `${p.testcaseId}.fail.md`);
+    fs.writeFileSync(latestPath, body, 'utf8');
+
+    if (!p.outDir) return latestPath;
+
+    try {
+      fs.mkdirSync(p.outDir, { recursive: true });
+      const archivedPath = path.join(p.outDir, `${p.testcaseId}.fail.md`);
+      fs.writeFileSync(archivedPath, body, 'utf8');
+      return archivedPath;
+    } catch (err) {
+      console.warn(`[DIAG] Không lưu được báo cáo vào thư mục run: ${err.message}`);
+      return latestPath;
+    }
   } catch (err) {
     console.warn(`[DIAG] Ghi báo cáo lỗi thất bại: ${err.message}`);
     return null;

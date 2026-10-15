@@ -1,3 +1,4 @@
+// [ENGINE V1 — PUPPETEER] Từ 2026-09-29 engine v2 (src/engine/, Playwright + Sheets API) không còn gọi file này. Giữ nguyên, không xoá (theo lệ repo).
 // ============================================================================
 // recorder.js: Quản lý ghi video kiểm thử kèm con trỏ ảo
 // ============================================================================
@@ -16,12 +17,18 @@ class TestRecorder {
     this.isRecording = false;
   }
 
-  async start(testcaseId) {
-    if (!fs.existsSync(config.VIDEOS_DIR)) {
-      fs.mkdirSync(config.VIDEOS_DIR, { recursive: true });
+  /**
+   * @param {string} testcaseId
+   * @param {string} [outDir] Thư mục run của lần chạy này. Không truyền thì về
+   *   videos/ như cũ, để smoke test và các script rời không phải sửa gì.
+   */
+  async start(testcaseId, outDir) {
+    const dir = outDir || config.VIDEOS_DIR;
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
     }
 
-    this.videoPath = path.join(config.VIDEOS_DIR, `${testcaseId}_AutoRecord.mp4`);
+    this.videoPath = path.join(dir, `${testcaseId}_AutoRecord.mp4`);
     
     // Nếu file cũ tồn tại, xoá trước khi quay mới
     if (fs.existsSync(this.videoPath)) {

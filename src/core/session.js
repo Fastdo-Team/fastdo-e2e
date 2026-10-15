@@ -1,3 +1,4 @@
+// [ENGINE V1 — PUPPETEER] Từ 2026-09-29 engine v2 (src/engine/, Playwright + Sheets API) không còn gọi file này. Giữ nguyên, không xoá (theo lệ repo).
 // ============================================================================
 // session.js: Quản lý Auth State, lưu & nạp cookie để bỏ qua bước Login
 // ============================================================================
@@ -6,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const { humanClick, humanType, waitXPath } = require('./cursor_motion');
+const { dismissOrgPickerIfPresent } = require('./page_ready');
 
 /**
  * Kiểm tra xem session đã lưu trong file có tồn tại không
@@ -205,6 +207,16 @@ async function ensureAuthenticated(page) {
     const currentUrl = page.url();
     const isLoginPage = currentUrl.includes('login') || (await page.$('xpath/.//a[contains(., "Đăng nhập") or contains(., "Log in")]'));
     if (!isLoginPage) {
+      // Cookie/localStorage khôi phục lại chỉ mang trạng thái ĐÃ ĐĂNG NHẬP, KHÔNG
+      // mang theo việc đã chọn tổ chức nào — đó là lựa chọn per-tab phía server,
+      // không nằm trong localStorage được lưu. Bỏ qua bước này thì mọi trang sau
+      // đó lặng lẽ render màn "chọn tổ chức" thay vì trang thật — không phải
+      // MỘT LẦN mà nhiều điều hướng liên tiếp có thể đều dính, vì tốc độ app tự
+      // khôi phục ngữ cảnh tổ chức phía client không đều giữa các lượt (đã đo
+      // thật, khác nhau giữa các lần chạy trên cùng một máy). Xử lý DỨT ĐIỂM
+      // ngay tại nguồn — đây là trang gốc, chưa điều hướng đi đâu — mạnh hơn
+      // nhiều so với vá từng chỗ gọi ở các trang sâu phía sau.
+      await ensureOrgSelected(page);
       console.log('[AUTH] Session còn hiệu lực, bỏ qua đăng nhập!');
       return;
     }
@@ -212,6 +224,23 @@ async function ensureAuthenticated(page) {
   }
 
   await performFullLogin(page);
+}
+
+/**
+ * Đảm bảo KHÔNG còn đứng ở màn chọn tổ chức trước khi trả điều khiển cho caller.
+ * Lặp lại thay vì kiểm 1 lần: tốc độ app tự khôi phục ngữ cảnh tổ chức phía
+ * client không đều, có lúc cần 2-3 vòng mới ổn định thật sự (đã đo thật qua
+ * nhiều lần chạy). Dùng chung `dismissOrgPickerIfPresent` với waitForSettle /
+ * openEvaluationTab — một cơ chế, nhiều nơi gọi.
+ */
+async function ensureOrgSelected(page) {
+  for (let i = 0; i < 6; i += 1) {
+    const stillPicker = await page.$('xpath/.//a[contains(., "' + config.ORG_NAME + '")]').catch(() => null);
+    if (!stillPicker) return; // đã qua màn chọn tổ chức (hoặc chưa từng có)
+    const dismissed = await dismissOrgPickerIfPresent(page);
+    if (!dismissed) return; // click thất bại (đã log trong dismissOrgPickerIfPresent) — đừng lặp vô ích
+    await new Promise((r) => setTimeout(r, 600));
+  }
 }
 
 module.exports = {

@@ -21,20 +21,25 @@ module.exports = {
   id: 'EVAL_024',
   title: 'Sidebar module tối đa 3 mục điều hướng (D-036)',
   targetPath: '/evaluation',
+  // Engine v2: chỉ đọc, không đổi dữ liệu nào → chạy song song an toàn.
+  profile: 'default',
+  parallel: true,
 
   getTargetUrl() {
     return new URL(this.targetPath, config.TARGET_URL).toString();
   },
 
   async run(ctx) {
-    const { page, click } = ctx;
+    const { page, click, mark } = ctx;
 
+    mark('B1 Mở module Đánh giá nhân sự');
     console.log('[TEST] Mở module Đánh giá nhân sự');
     await page.goto(this.getTargetUrl(), { waitUntil: 'domcontentloaded', timeout: 30000 });
     await H.waitFor(page, () => document.body.innerText.includes('Kỳ đánh giá'), null, 25000);
     await H.dismissPushPopup(page, click);
     await H.sleep(800);
 
+    mark('B2 Đọc các mục sidebar của module');
     console.log('[TEST] Quan sát menu điều hướng bên trái của module');
     const nav = await page.evaluate(() => {
       const section = document.querySelector('#navbar-overall-need-to-guidelines');

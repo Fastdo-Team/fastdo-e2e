@@ -56,21 +56,21 @@ if (document.readyState === 'loading') {
 }
 `;
 
-let lastMouse = { x: 100, y: 100 };
-
 /**
  * Di chuyển con trỏ mượt mà tới toạ độ đích (8-10 steps, ~80-100ms)
  * Đủ mượt để video 30fps bắt trọn chuyển động, nhưng không làm chậm test.
+ * Vị trí chuột lưu THEO TỪNG PAGE: chạy song song nhiều page thì mỗi page có con trỏ
+ * riêng, không nhảy theo vị trí của page khác.
  */
 async function smoothMove(page, targetX, targetY, steps = 8) {
-  const { x: sx, y: sy } = lastMouse;
+  const { x: sx, y: sy } = page.__fastdoMouse || { x: 100, y: 100 };
   for (let i = 1; i <= steps; i++) {
     const ix = sx + (targetX - sx) * (i / steps);
     const iy = sy + (targetY - sy) * (i / steps);
     await page.mouse.move(ix, iy);
     await new Promise((r) => setTimeout(r, 10));
   }
-  lastMouse = { x: targetX, y: targetY };
+  page.__fastdoMouse = { x: targetX, y: targetY };
 }
 
 /**
@@ -82,7 +82,8 @@ async function humanClick(page, elementOrSelector, opts = {}) {
     if (elementOrSelector.startsWith('//') || elementOrSelector.startsWith('.//')) {
       element = await waitXPath(page, elementOrSelector, opts.timeout || 10000);
     } else {
-      await page.waitForSelector(elementOrSelector, { timeout: opts.timeout || 10000 });
+      // 'attached' = đúng nghĩa waitForSelector của Puppeteer cũ (Playwright mặc định chờ 'visible')
+      await page.waitForSelector(elementOrSelector, { timeout: opts.timeout || 10000, state: 'attached' });
       element = await page.$(elementOrSelector);
     }
   }
@@ -121,14 +122,15 @@ async function humanType(page, elementOrSelector, text, opts = {}) {
 }
 
 /**
- * Chờ phần tử XPath xuất hiện với polling tối ưu
+ * Chờ phần tử XPath xuất hiện với polling tối ưu. Nhận XPath trần (".//a[…]") hoặc có
+ * tiền tố "xpath=" / "xpath/" (cú pháp cũ) — luôn gọi Playwright bằng "xpath=".
  */
 async function waitXPath(page, xpath, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
-  const cleanXpath = xpath.startsWith('xpath/') ? xpath.replace('xpath/', '') : xpath;
+  const cleanXpath = String(xpath).replace(/^xpath[=/]/, '');
 
   while (Date.now() < deadline) {
-    const [el] = await page.$$('xpath/' + cleanXpath);
+    const [el] = await page.$$('xpath=' + cleanXpath);
     if (el) return el;
     await new Promise((r) => setTimeout(r, 250));
   }

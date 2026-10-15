@@ -23,21 +23,28 @@ module.exports = {
   id: 'EVAL_021',
   title: 'Kích hoạt Mẫu đánh giá Draft hợp lệ thành công',
   targetPath: '/evaluation?tab=template',
+  // Engine v2: kích hoạt làm mẫu Nháp chuyển 'Đang dùng' — mẫu bị TIÊU HAO mỗi lần chạy
+  // (cần thêm bản sao khi chạy nháp rồi chạy thật). Mẫu được khoá: 021/022 không chạy cùng lúc.
+  profile: 'default',
+  parallel: true,
+  consumes: [`mau:${DRAFT_TEMPLATE_NAME}`],
 
   getTargetUrl() {
     return new URL(this.targetPath, config.TARGET_URL).toString();
   },
 
   async run(ctx) {
-    const { page, click, waitXPath } = ctx;
+    const { page, click, waitXPath, mark } = ctx;
 
     // Bước 0-1: Mở mẫu Nháp sandbox
+    mark('B1 Mở mẫu Nháp ở chế độ Sửa');
     console.log('[TEST] Mở danh sách Mẫu đánh giá');
     await H.openEvaluationTab(page, click, 'template');
     console.log(`[TEST] Mở mẫu Nháp "${DRAFT_TEMPLATE_NAME}" ở chế độ Sửa`);
     await H.openDraftByName(page, click, waitXPath, DRAFT_TEMPLATE_NAME);
 
     // Bước 2: Chuẩn hoá thành 1 mẫu HỢP LỆ (có nhóm, có tiêu chí, trọng số > 0)
+    mark('B2 Chuẩn hoá thành mẫu hợp lệ');
     let cards = await H.readGroupCards(page);
     console.log('[TEST] Cấu trúc ban đầu:', JSON.stringify(cards));
     if (cards.length === 0) {
@@ -83,6 +90,7 @@ module.exports = {
     const finalGroup = cards.find((c) => !c.isEmpty);
 
     // Bước 3: Bấm Kích hoạt
+    mark('B3 Bấm Kích hoạt');
     console.log('[TEST] Thao tác: Bấm nút "Kích hoạt"');
     const act = await H.clickActivate(page, click, waitXPath);
     console.log('[TEST] Bị chặn:', act.blocked, '| Đã kích hoạt:', act.activated);
@@ -91,6 +99,7 @@ module.exports = {
     }
 
     // Bước 4: Verify độc lập - reload xem banner chỉ xem và khả năng sửa
+    mark('B4 Reload — banner chỉ xem, ẩn thao tác sửa');
     console.log('[TEST] Verify độc lập: Reload kiểm tra trình soạn thảo...');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await H.waitFor(page, () => document.body.innerText.includes('Quay lại danh sách'), null, 25000);
@@ -112,6 +121,7 @@ module.exports = {
     // sau khi kích hoạt, trang soạn thảo chỉ hiện banner "chỉ xem" chứ KHÔNG in
     // chữ "Đang dùng" - bám vào text của trang editor sẽ báo FAIL oan.
     console.log('[TEST] Verify độc lập: Đối chiếu trạng thái trong danh sách mẫu...');
+    mark('B5 Đối chiếu danh sách: "Đang dùng"');
     await H.openEvaluationTab(page, click, 'template');
     const listStatus = await page.evaluate((name) => {
       const row = Array.from(document.querySelectorAll('tbody tr')).find((tr) => {

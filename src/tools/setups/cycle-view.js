@@ -26,14 +26,14 @@ module.exports = {
         Array.from(document.querySelectorAll('select')).find((s) => s.innerText.includes('Nháp'))
       );
       const selEl = selHandle.asElement();
+      // Playwright chỉ truyền 1 tham số vào trang — gộp thành mảng (handle trong mảng vẫn được)
       await page.evaluate(
-        (el, lbl) => {
+        ([el, lbl]) => {
           const opt = Array.from(el.options).find((o) => o.textContent.trim() === lbl);
           el.value = opt.value;
           el.dispatchEvent(new Event('change', { bubbles: true }));
         },
-        selEl,
-        STATUS
+        [selEl, STATUS]
       );
       await H.sleep(1200);
     }

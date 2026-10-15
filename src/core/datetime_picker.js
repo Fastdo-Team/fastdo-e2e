@@ -6,7 +6,7 @@
  * Điền ngày giờ vào input Flatpickr và verify giá trị
  */
 async function setFlatpickrField(page, placeholder, day, hour, minute) {
-  const input = await page.$(`xpath/.//input[@placeholder="${placeholder}"]`);
+  const input = await page.$(`xpath=.//input[@placeholder="${placeholder}"]`);
   if (!input) throw new Error(`Không tìm thấy input ngày giờ với placeholder "${placeholder}"`);
   
   await input.click();

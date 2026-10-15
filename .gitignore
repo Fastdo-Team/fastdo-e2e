@@ -7,4 +7,14 @@ node_modules/
 videos/
 recordings/
 .chrome_profile/
+.chrome_profile_*/
 diagnostics/
+.superpowers/
+runs/
+.env.bak
+.ui-token
+.claude-auth/
+.env.bak*
+*.bak
+_tmp_*.js
+.vscode/

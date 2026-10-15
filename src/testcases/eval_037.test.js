@@ -78,8 +78,9 @@ async function openFirstNotStartedAssignment(ctx, needle) {
 async function scoreCriterion(ctx, groupIndex, score, note) {
   const { page, click, type } = ctx;
 
+  // Playwright chỉ truyền 1 tham số vào trang — gộp thành mảng
   const radioHandle = await page.evaluateHandle(
-    (gi, val) => {
+    ([gi, val]) => {
       const groups = Array.from(document.querySelectorAll('div.box.mb-3')).filter((g) =>
         g.querySelector('input[type="radio"]')
       );
@@ -89,8 +90,7 @@ async function scoreCriterion(ctx, groupIndex, score, note) {
       const label = labels[val - 1];
       return label ? label.querySelector('input[type="radio"]') : null;
     },
-    groupIndex,
-    score
+    [groupIndex, score]
   );
 
   const radio = radioHandle.asElement();
@@ -137,6 +137,11 @@ module.exports = {
   id: 'EVAL_037',
   title: 'Happy: Nhân viên mở phiếu, chấm điểm và Lưu nháp tự đánh giá',
   targetPath: '/evaluation/my-assessments',
+  // Engine v2: Lưu nháp đưa phiếu khỏi trạng thái "Chưa bắt đầu" — phiếu bị TIÊU HAO mỗi lần
+  // chạy (cần thêm phiếu khi chạy nháp rồi chạy thật).
+  profile: 'default',
+  parallel: true,
+  consumes: [`phieu:${TARGET_ASSIGNMENT_NAME}`],
 
   getTargetUrl() {
     return new URL(this.targetPath, config.TARGET_URL).toString();
@@ -146,13 +151,13 @@ module.exports = {
     const { page, click, step, dump } = ctx;
     const listUrl = this.getTargetUrl();
 
-    await step('mo danh sach Danh gia cua toi', async () => {
+    await step('B1 Mở danh sách Đánh giá của tôi', async () => {
       await page.goto(listUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await H.waitFor(page, () => document.body.innerText.includes('Cần làm'), null, 20000);
       await H.dismissPushPopup(page, click);
     });
 
-    const before = await step(`mo phieu "${TARGET_ASSIGNMENT_NAME}" Chua bat dau`, () =>
+    const before = await step(`B2 Mở phiếu "${TARGET_ASSIGNMENT_NAME}" Chưa bắt đầu`, () =>
       openFirstNotStartedAssignment(ctx, TARGET_ASSIGNMENT_NAME)
     );
 
@@ -160,7 +165,7 @@ module.exports = {
     // chờ URL rồi đọc DOM ngay sẽ ăn race condition (đã bắt được thật: DOM lúc
     // chết có đủ 5 nhóm tiêu chí dù bước này báo "vào được trang chi tiết").
     // Phải chờ chính nội dung cần dùng, không chờ URL làm đại diện cho nó.
-    await step('cho vao trang chi tiet phieu (URL + form da render)', async () => {
+    await step('B3 Vào trang chi tiết phiếu (URL + form đã render)', async () => {
       const gotUrl = await H.waitFor(page, () => location.href.includes('view=detail'), null, 10000);
       if (!gotUrl) throw new Error('URL không chuyển sang view=detail sau khi bấm "Mở"');
       const gotForm = await H.waitFor(
@@ -181,7 +186,7 @@ module.exports = {
     }
 
     const notes = [];
-    await step(`cham diem ${totalCriteria} tieu chi (muc ${SCORE_TO_SET}/5) + nhap nhan xet`, async () => {
+    await step(`B4 Chấm điểm ${totalCriteria} tiêu chí (mức ${SCORE_TO_SET}/5) + nhận xét`, async () => {
       for (let i = 0; i < totalCriteria; i += 1) {
         const note = `Ghi chu tu dong kiem thu EVAL_037 - tieu chi ${i + 1}`;
         notes.push(note);
@@ -192,10 +197,10 @@ module.exports = {
     const progressAfterScoring = await readProgress(page);
     await dump('sau khi cham diem, truoc khi luu nhap');
 
-    const savedOk = await step('bam Luu nhap', () => H.saveDraft(page, click, ctx.waitXPath));
+    const savedOk = await step('B5 Bấm Lưu nháp', () => H.saveDraft(page, click, ctx.waitXPath));
     await H.sleep(1200);
 
-    const after = await step('quay lai danh sach, doc lai trang thai', async () => {
+    const after = await step('B6 Quay lại danh sách, đọc lại trạng thái', async () => {
       await page.goto(listUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await H.waitFor(page, () => document.body.innerText.includes('Cần làm'), null, 20000);
       return countAssignmentsByName(page, TARGET_ASSIGNMENT_NAME);
@@ -203,7 +208,7 @@ module.exports = {
 
     const statusChanged = after.total === before.total && after.notStarted === before.notStarted - 1;
 
-    const persistCheck = await step('tai lai chinh phieu vua luu, kiem tra du lieu con nguyen', async () => {
+    const persistCheck = await step('B7 Tải lại chính phiếu vừa lưu, kiểm dữ liệu còn nguyên', async () => {
       await page.goto(detailUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await H.waitFor(page, () => /\d+\/\d+\s*tiêu chí đã có điểm/.test(document.body.innerText), null, 15000);
 

@@ -7,13 +7,15 @@
 // ============================================================================
 
 const config = require('../config');
+const { dismissOrgPickerIfPresent } = require('./page_ready');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** Chờ tới khi điều kiện đúng; hết hạn thì trả false thay vì ném lỗi */
 async function waitFor(page, fn, arg = null, timeout = 8000) {
   try {
-    await page.waitForFunction(fn, { timeout, polling: 200 }, arg);
+    // Playwright: (fn, arg, options) — Puppeteer cũ là (fn, options, arg)
+    await page.waitForFunction(fn, arg, { timeout, polling: 200 });
     return true;
   } catch (err) {
     return false;
@@ -46,10 +48,56 @@ async function dismissPushPopup(page, click) {
 async function openEvaluationTab(page, click, tab = 'template') {
   const url = new URL(`/evaluation?tab=${tab}`, config.TARGET_URL).toString();
   await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForFunction(
-    () => /Tạo (thang điểm|tiêu chí|mẫu đánh giá)/i.test(document.body.innerText),
-    { timeout: 25000, polling: 200 }
-  );
+
+  // Điều hướng thẳng tới URL sâu có thể đua với việc app tự khôi phục ngữ cảnh
+  // tổ chức phía client — session vẫn hợp lệ nhưng trang render lại màn "chọn tổ
+  // chức" thay vì trang thật, và chờ chữ của trang thật bên dưới sẽ hết hạn vô
+  // ích vì thứ nó chờ không bao giờ xuất hiện (đã gặp thật: đúng dòng lỗi
+  // "Waiting failed: 25000ms exceeded" ở preflight). Màn chọn tổ chức render
+  // KHÔNG đồng bộ sau domcontentloaded, nên phải kiểm chung nhịp với vòng chờ
+  // nội dung thật bên dưới — thêm một vòng chờ CỐ ĐỊNH riêng trước đó sẽ tốn vài
+  // giây oan uổng ở đường thường (không đua), vốn là ca chiếm đa số.
+  let t0 = Date.now();
+  let ready = false;
+  // Giới hạn số lần tự quay lại `url` (không phải vô hạn, không phải đúng 1 lần
+  // — xem giải thích đầy đủ trong waitForSettle, cùng một lý do). Đây CHÍNH LÀ
+  // trần cứng chống treo mãi — t0 được reset sau mỗi lần quay lại (bên dưới) để
+  // nội dung thật hưởng trọn 25s riêng, nhưng số lần reset đó bị MAX_RE_NAVIGATE
+  // chặn, nên tổng thời gian vẫn hữu hạn: tối đa (MAX_RE_NAVIGATE+1) × 25s.
+  let reNavigateCount = 0;
+  const MAX_RE_NAVIGATE = 3;
+  while (Date.now() - t0 < 25000) {
+    const justDismissed = await dismissOrgPickerIfPresent(page);
+    if (justDismissed && reNavigateCount < MAX_RE_NAVIGATE) {
+      reNavigateCount += 1;
+      // Bấm chọn tổ chức xong, app tự CHUYỂN HƯỚNG SANG /homepage — bỏ luôn URL
+      // sâu ban đầu (đã xác nhận thật: title/URL đổi hẳn sau click). Không quay
+      // lại đúng `url` thì vòng chờ bên dưới chờ vô ích vì đang đứng nhầm trang.
+      // Nghỉ 1 nhịp trước khi quay lại — quay lại ngay lập tức kích hoạt đúng
+      // cùng cuộc đua đó, tạo vòng lặp tự đá nhau (đã đo thật, xem waitForSettle).
+      await sleep(1200);
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        // Trang thật sự tải lại từ đầu ở đây — nội dung thật được hưởng trọn 25s
+        // riêng, không bị trừ hao phần đã tiêu cho việc chọn lại tổ chức. Không
+        // tự gia hạn vô tận: MAX_RE_NAVIGATE ở trên chặn số lần reset này.
+        t0 = Date.now();
+      } catch (e) {
+        // Điều hướng lỗi thì để vòng lặp tự thử lại nhịp sau, đừng ném ngay
+      }
+    }
+    ready = await page
+      .evaluate(() => /Tạo (thang điểm|tiêu chí|mẫu đánh giá)/i.test(document.body.innerText))
+      .catch(() => false); // đang điều hướng giữa chừng, thử lại nhịp sau
+    if (ready) break;
+    await sleep(200);
+  }
+  if (!ready) {
+    throw new Error(
+      `Chờ trang "${tab}" sẵn sàng quá hạn (đã chọn lại tổ chức ${reNavigateCount} lần) — ` +
+        'xem ctx.dump() để biết đang kẹt ở đâu.'
+    );
+  }
   await dismissPushPopup(page, click);
   return url;
 }
@@ -172,8 +220,9 @@ async function setGroupWeight(page, groupIndex, value) {
 
 /** Đặt Trọng số cho dòng tiêu chí thứ `rowIndex` trong nhóm thứ `groupIndex` */
 async function setCriterionWeight(page, groupIndex, rowIndex, value) {
+  // Playwright chỉ truyền 1 tham số vào trang — gộp thành mảng
   const handle = await page.evaluateHandle(
-    (i, j) => {
+    ([i, j]) => {
       const cards = Array.from(document.querySelectorAll('div.box.mb-4')).filter((c) =>
         c.querySelector('input[placeholder="Tên nhóm"]')
       );
@@ -182,8 +231,7 @@ async function setCriterionWeight(page, groupIndex, rowIndex, value) {
       const row = card.querySelectorAll('tbody tr')[j];
       return row ? row.querySelector('input[type="number"]') : null;
     },
-    groupIndex,
-    rowIndex
+    [groupIndex, rowIndex]
   );
 
   const input = handle.asElement();

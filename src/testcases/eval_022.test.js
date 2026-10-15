@@ -29,21 +29,28 @@ module.exports = {
   id: 'EVAL_022',
   title: 'Tổng trọng số khác 100% vẫn kích hoạt được',
   targetPath: '/evaluation?tab=template',
+  // Engine v2: kích hoạt làm mẫu Nháp chuyển 'Đang dùng' — mẫu bị TIÊU HAO mỗi lần chạy
+  // (cần thêm bản sao khi chạy nháp rồi chạy thật). Mẫu được khoá: 021/022 không chạy cùng lúc.
+  profile: 'default',
+  parallel: true,
+  consumes: [`mau:${DRAFT_TEMPLATE_NAME}`],
 
   getTargetUrl() {
     return new URL(this.targetPath, config.TARGET_URL).toString();
   },
 
   async run(ctx) {
-    const { page, click, waitXPath } = ctx;
+    const { page, click, waitXPath, mark } = ctx;
 
     // Bước 0-1: Mở mẫu Nháp sandbox
+    mark('B1 Mở mẫu Nháp ở chế độ Sửa');
     console.log('[TEST] Mở danh sách Mẫu đánh giá');
     await H.openEvaluationTab(page, click, 'template');
     console.log(`[TEST] Mở mẫu Nháp "${DRAFT_TEMPLATE_NAME}" ở chế độ Sửa`);
     await H.openDraftByName(page, click, waitXPath, DRAFT_TEMPLATE_NAME);
 
     // Bước 2: Chuẩn hoá - bỏ nhóm rỗng, đảm bảo mọi nhóm đều có tiêu chí
+    mark('B2 Chuẩn hoá: bỏ nhóm rỗng');
     let cards = await H.readGroupCards(page);
     console.log('[TEST] Cấu trúc ban đầu:', JSON.stringify(cards));
     if (cards.some((c) => c.isEmpty) && cards.some((c) => !c.isEmpty)) {
@@ -56,6 +63,7 @@ module.exports = {
     }
 
     // Bước 3: Ép trọng số lệch hẳn 100
+    mark('B3 Ép tổng trọng số khác 100');
     console.log('[TEST] Thao tác: Đặt trọng số nhóm/tiêu chí sao cho tổng KHÁC 100');
     for (let i = 0; i < cards.length; i++) {
       const w = GROUP_WEIGHTS[i] !== undefined ? GROUP_WEIGHTS[i] : GROUP_WEIGHTS[GROUP_WEIGHTS.length - 1];
@@ -87,6 +95,7 @@ module.exports = {
     }
 
     // Bước 4: Bấm Kích hoạt
+    mark('B4 Bấm Kích hoạt');
     console.log('[TEST] Thao tác: Bấm nút "Kích hoạt"');
     let act = await H.clickActivate(page, click, waitXPath);
     console.log('[TEST] Bị chặn:', act.blocked, '| Đã kích hoạt:', act.activated);
@@ -139,6 +148,7 @@ module.exports = {
     }
 
     // Bước 5: Verify độc lập - reload xem trạng thái
+    mark('B5 Reload + đối chiếu danh sách');
     console.log('[TEST] Verify độc lập: Reload kiểm tra trạng thái mẫu...');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await H.waitFor(page, () => document.body.innerText.includes('Quay lại danh sách'), null, 25000);

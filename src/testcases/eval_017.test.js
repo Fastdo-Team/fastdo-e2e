@@ -27,7 +27,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Chờ tới khi điều kiện đúng; hết hạn thì bỏ qua thay vì ném lỗi */
 async function waitFor(page, fn, arg, timeout = 8000) {
   try {
-    await page.waitForFunction(fn, { timeout, polling: 200 }, arg);
+    // Playwright: (fn, arg, options) — Puppeteer cũ là (fn, options, arg)
+    await page.waitForFunction(fn, arg, { timeout, polling: 200 });
     return true;
   } catch (err) {
     return false;
@@ -110,24 +111,30 @@ module.exports = {
   id: 'EVAL_017',
   title: 'Bug UI: text thô "Lỗi: group.ErrorSummary" khi Kích hoạt thất bại',
   targetPath: '/evaluation?tab=template',
+  // Engine v2: hồ sơ tài khoản + chạy được song song (mẫu Nháp dùng chung được tự khoá
+  // theo DRAFT_TEMPLATE_NAME, nên 017/019/020 không bao giờ chạy cùng lúc).
+  profile: 'default',
+  parallel: true,
+  timeoutSec: 150,
 
   getTargetUrl() {
     return new URL(this.targetPath, config.TARGET_URL).toString();
   },
 
   async run(ctx) {
-    const { page, click, type, waitXPath } = ctx;
+    const { page, click, type, waitXPath, mark } = ctx;
 
     // -----------------------------------------------------------------------
     // Bước 0: Mở danh sách Mẫu đánh giá
     // -----------------------------------------------------------------------
+    mark('B0 Mở danh sách Mẫu đánh giá');
     const listUrl = this.getTargetUrl();
     console.log(`[TEST] Mở danh sách Mẫu đánh giá: ${listUrl}`);
     await page.goto(listUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForFunction(
       (name) => document.body.innerText.includes(name),
-      { timeout: 25000, polling: 200 },
-      DRAFT_TEMPLATE_NAME
+      DRAFT_TEMPLATE_NAME,
+      { timeout: 25000, polling: 200 }
     );
 
     // Popup "Bật thông báo đẩy" che bảng danh sách -> phải đóng trước khi click
@@ -145,6 +152,7 @@ module.exports = {
     // -----------------------------------------------------------------------
     // Bước 1: Vào trình soạn thảo mẫu Nháp (tự tìm theo tên, không hardcode id)
     // -----------------------------------------------------------------------
+    mark('B1 Mở mẫu Nháp ở chế độ Sửa');
     const editXPath =
       `.//tr[.//text()[contains(., "${DRAFT_TEMPLATE_NAME}")]]` +
       `//*[self::button or self::a][contains(., "Sửa")]`;
@@ -161,6 +169,7 @@ module.exports = {
       () =>
         document.querySelector('div.box.mb-4 input[placeholder="Tên nhóm"]') &&
         document.body.innerText.includes('Kích hoạt'),
+      null,
       { timeout: 25000, polling: 200 }
     );
     console.log('[TEST] Đã vào trình soạn thảo:', page.url());
@@ -170,6 +179,7 @@ module.exports = {
     // (Kích hoạt thất bại vẫn ghi dữ liệu nháp xuống server nên nhóm rỗng của
     //  lần chạy trước còn sót lại -> phải dọn trước khi test.)
     // -----------------------------------------------------------------------
+    mark('B2 Chuẩn hoá: 1 nhóm hợp lệ + 1 nhóm rỗng');
     let cards = await readGroupCards(page);
     console.log('[TEST] Tiền điều kiện ban đầu:', JSON.stringify(cards));
 
@@ -212,6 +222,7 @@ module.exports = {
     // -----------------------------------------------------------------------
     // Bước 3: Bấm "Kích hoạt" -> hệ thống phải chặn
     // -----------------------------------------------------------------------
+    mark('B3 Bấm Kích hoạt — hệ thống phải chặn');
     console.log('[TEST] Thao tác: Bấm nút "Kích hoạt"');
     const activateBtn = await waitXPath(
       page,
@@ -238,6 +249,7 @@ module.exports = {
     // -----------------------------------------------------------------------
     // Bước 4: Kiểm tra text thô "group.ErrorSummary" trên từng card nhóm
     // -----------------------------------------------------------------------
+    mark('B4 Kiểm text thô group.ErrorSummary từng nhóm');
     cards = await readGroupCards(page);
     console.log('[TEST] Kiểm tra từng nhóm sau khi Kích hoạt:', JSON.stringify(cards));
 
@@ -253,12 +265,14 @@ module.exports = {
     // -----------------------------------------------------------------------
     // Bước 5: Verify độc lập - reload xem mẫu còn ở trạng thái Nháp không
     // -----------------------------------------------------------------------
+    mark('B5 Reload — mẫu vẫn Nháp');
     console.log('[TEST] Verify độc lập: Reload trang kiểm tra trạng thái mẫu...');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(
       () =>
         document.querySelector('div.box.mb-4 input[placeholder="Tên nhóm"]') &&
         document.body.innerText.includes('Kích hoạt'),
+      null,
       { timeout: 25000, polling: 200 }
     );
     const afterReloadText = await page.$eval('body', (b) => b.innerText);
@@ -268,6 +282,7 @@ module.exports = {
     // -----------------------------------------------------------------------
     // Bước 6: Dọn dẹp - xoá nhóm rỗng test vừa tạo, trả mẫu về trạng thái ban đầu
     // -----------------------------------------------------------------------
+    mark('B6 Dọn dẹp nhóm rỗng + Lưu nháp');
     try {
       const cleaned = await removeEmptyGroups(page, click);
       const saveBtn = await waitXPath(

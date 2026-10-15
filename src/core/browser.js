@@ -1,3 +1,4 @@
+// [ENGINE V1 — PUPPETEER] Từ 2026-09-29 engine v2 (src/engine/, Playwright + Sheets API) không còn gọi file này. Giữ nguyên, không xoá (theo lệ repo).
 // ============================================================================
 // browser.js: Quản lý kết nối & khởi chạy Chrome tối ưu
 // ============================================================================
@@ -22,13 +23,25 @@ function getStandardChromePath() {
 }
 
 /**
+ * In rõ đang chạy bằng tài khoản nào. Chạy nhầm slot là ghi kết quả của tài
+ * khoản này vào vòng test của tài khoản kia — sai âm thầm, nên phải thấy được.
+ */
+function logSlot() {
+  console.log(
+    `[BROWSER] Slot ${config.ACCOUNT} · ${config.EMAIL || '(chưa có email)'}` +
+      ` · CDP ${config.CDP_PORT} · profile ${path.basename(config.CHROME_PROFILE_DIR)}`
+  );
+}
+
+/**
  * Khởi tạo hoặc kết nối tới Chrome
  */
 async function initBrowser(options = {}) {
   let browser = null;
   let isConnected = false;
 
-  // 1. Thử kết nối tới Chrome debug port 9222 đang mở
+  // 1. Thử kết nối tới Chrome debug đang mở ở cổng của slot này
+  //    (slot 1 = 9222, slot 2 = 9223... xem config.js)
   try {
     browser = await puppeteer.connect({
       browserURL: config.CDP_URL,
@@ -38,9 +51,10 @@ async function initBrowser(options = {}) {
       protocolTimeout: 90000,
     });
     console.log('[BROWSER] Đã kết nối tới Chrome đang chạy tại', config.CDP_URL);
+    logSlot();
     isConnected = true;
   } catch (err) {
-    console.log('[BROWSER] Không thấy Chrome debug port 9222, đang tự động khởi chạy Chrome...');
+    console.log(`[BROWSER] Không thấy Chrome debug ở cổng ${config.CDP_PORT}, đang tự động khởi chạy Chrome...`);
   }
 
   // 2. Nếu chưa có, tự động tìm và khởi chạy Chrome thật
@@ -48,30 +62,34 @@ async function initBrowser(options = {}) {
     const chromePath = getStandardChromePath();
     if (!chromePath) {
       throw new Error(
-        'Không tìm thấy Google Chrome trên máy tính và không kết nối được port 9222.\n' +
-        'Vui lòng mở Chrome với flag: chrome.exe --remote-debugging-port=9222'
+        `Không tìm thấy Google Chrome trên máy tính và không kết nối được cổng ${config.CDP_PORT}.\n` +
+        `Vui lòng mở Chrome với flag: chrome.exe --remote-debugging-port=${config.CDP_PORT}`
       );
     }
 
-    const userDataDir = path.join(config.ROOT_DIR, '.chrome_profile');
+    // Profile riêng theo slot: Chrome KHÔNG mở được 2 tiến trình trên cùng một
+    // user-data-dir, nên dùng chung profile là slot thứ hai chết ngay lúc khởi chạy.
+    const userDataDir = config.CHROME_PROFILE_DIR;
     if (!fs.existsSync(userDataDir)) {
       fs.mkdirSync(userDataDir, { recursive: true });
     }
 
     browser = await puppeteer.launch({
       executablePath: chromePath,
-      headless: false,
+      // BROWSER_HEADLESS=1: Chrome ẩn — agent AI-QC chạy dưới Windows Service (không có màn hình) đặt biến này cho probe.
+      headless: process.env.BROWSER_HEADLESS === '1',
       defaultViewport: null,
       protocolTimeout: 90000,
       userDataDir,
       args: [
-        '--remote-debugging-port=9222',
+        `--remote-debugging-port=${config.CDP_PORT}`,
         '--window-size=1300,800',
         '--no-first-run',
         '--no-default-browser-check',
       ],
     });
     console.log('[BROWSER] Đã tự khởi chạy Google Chrome thành công');
+    logSlot();
   }
 
   // Tạo page mới và cấu hình

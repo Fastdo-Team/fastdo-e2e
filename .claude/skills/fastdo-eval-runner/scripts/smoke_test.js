@@ -1,24 +1,36 @@
+// ============================================================================
+// smoke_test.js: Thử đường ống quay video + upload Catbox, KHÔNG đụng tới app.
+//
+//   npm run smoke-test
+//
+// Dùng khi runner báo "Lưu video thất bại" hoặc "Upload Catbox thất bại" và cần
+// biết lỗi nằm ở app hay ở đường ống ghi hình: smoke test chỉ mở example.com,
+// quay 1.5 giây rồi upload. Chạy OK nghĩa là ffmpeg + CATBOX_USERHASH đều sống,
+// lỗi nằm ở phía testcase.
+//
+// Dùng chung module với runner (src/core/*) nên không có bản sao cấu hình riêng
+// nào để lệch nữa.
+// ============================================================================
+
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer-core');
 const { PuppeteerScreenRecorder } = require('puppeteer-screen-recorder');
-const config = require('./config');
-const { uploadToCatbox } = require('./catbox_upload');
 
-const CURSOR_SRC = fs.readFileSync(path.join(__dirname, 'cursor_overlay.js'), 'utf8');
+const ROOT_DIR = path.join(__dirname, '..', '..', '..', '..');
+const config = require(path.join(ROOT_DIR, 'src', 'config'));
+const { uploadToCatbox } = require(path.join(ROOT_DIR, 'src', 'core', 'catbox'));
+const { CURSOR_CSS_AND_JS } = require(path.join(ROOT_DIR, 'src', 'core', 'cursor_motion'));
 
 async function main() {
   const browser = await puppeteer.connect({ browserURL: config.CDP_URL, defaultViewport: null });
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
-  await page.evaluateOnNewDocument(CURSOR_SRC);
+  await page.evaluateOnNewDocument(CURSOR_CSS_AND_JS);
   await page.bringToFront();
 
   const videoPath = path.join(__dirname, 'smoke_test_record.mp4');
-  const recorder = new PuppeteerScreenRecorder(page, {
-    fps: 30,
-    videoFrame: { width: 1280, height: 720 },
-  });
+  const recorder = new PuppeteerScreenRecorder(page, config.RECORDER_CONFIG);
   await recorder.start(videoPath);
 
   await page.goto('https://example.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
