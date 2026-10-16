@@ -15,11 +15,16 @@ const config = require('../config');
 const { CURSOR_CSS_AND_JS } = require('../core/cursor_motion');
 const { attachCollectors, writeFailReport } = require('../core/diagnostics');
 const { guardPage, contractError } = require('./page_guard');
-const { warmUp, VIEWPORT } = require('./app_session');
+const { warmUp, ensureProfileSession, VIEWPORT } = require('./app_session');
+const { getProfile, storagePathOf } = require('./profiles');
+const { createQcDb } = require('./qc_db');
 const { createStepLog } = require('./steps');
 const { paceFor } = require('./video_pace');
 const { createCtx } = require('./ctx');
 const { createRecord, verdictOf } = require('./result_v2');
+const { ticketOf } = require('./case_id');
+
+const CLEANUP_TIMEOUT_MS = 90000;
 
 const errMsg = (err) => (err && err.message ? String(err.message) : String(err));
 
@@ -58,6 +63,33 @@ function guardRun(promise, { timeoutMs, signal, label = 'case' }) {
         if (signal) signal.removeEventListener('abort', onAbort);
       });
   });
+}
+
+/** Trang đích để khởi động case: kịch bản AI-QC theo ticket bắt đầu ngay ở targetPath; kịch bản khác giữ trang chủ như cũ */
+function warmUpUrl(script, caseId) {
+  if (!ticketOf(caseId) || typeof script.module.getTargetUrl !== 'function') return undefined;
+  try {
+    return script.module.getTargetUrl();
+  } catch {
+    return undefined;
+  }
+}
+
+/** Chạy các việc ctx.cleanup theo thứ tự ngược, mỗi việc có hạn giờ riêng; không ném lỗi */
+async function runCleanups(cleanups, { print = console.log, timeoutMs = CLEANUP_TIMEOUT_MS } = {}) {
+  const out = [];
+  for (const item of cleanups.slice().reverse()) {
+    const started = Date.now();
+    try {
+      await guardRun(Promise.resolve().then(() => item.fn()), { timeoutMs, label: `dọn «${item.label}»` });
+      out.push({ label: item.label, ok: true, seconds: (Date.now() - started) / 1000 });
+      print(`   ↺ dọn: ${item.label}`);
+    } catch (err) {
+      out.push({ label: item.label, ok: false, error: errMsg(err), seconds: (Date.now() - started) / 1000 });
+      print(`   ⚠ dọn lỗi: ${item.label} ← ${errMsg(err)}`);
+    }
+  }
+  return out;
 }
 
 /** Kiểm hợp đồng kết quả; vi phạm → ném lỗi HỢP ĐỒNG KỊCH BẢN (không bao giờ thành kết quả kiểm thử) */
@@ -123,9 +155,15 @@ async function runCase({
   let page = null;
   let collector = null;
   let stepLog = createStepLog({ print });
+  const cleanups = [];
+  const extraContexts = [];
+  const tempProfiles = [];
+  const qcDb = createQcDb({ profile, targetUrl: config.TARGET_URL, print });
+  let videoT0 = null;
   const pace = paceFor(opts.record);
   const timeoutMs = (opts.caseTimeoutSec || script.meta.timeoutSec) * 1000;
-  const traceOn = opts.trace !== false;
+  // E2E_TRACE=0: phiên tái hiện AI-QC chạy nháp hàng chục lần, chỉ đọc *.fail.md + dump — trace làm chậm mỗi lần
+  const traceOn = opts.trace !== false && process.env.E2E_TRACE !== '0';
   const tracePath = path.join(runDir, 'trace.zip');
 
   try {
@@ -138,17 +176,36 @@ async function runCase({
     if (traceOn) await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
     page = guardPage(await context.newPage());
     page.__fastdoOrg = profile.org;
-    const videoT0 = Date.now();
+    videoT0 = Date.now();
     collector = attachCollectors(page);
     collector.reset();
 
     // Khởi động (vào app, đúng tổ chức) — phần này bị cắt khỏi đầu video.
     const doWarmUp = opts.warmUp || warmUp;
-    await guardRun(Promise.resolve().then(() => doWarmUp(page, profile)), { timeoutMs: 60000, signal, label: 'khởi động (vào app)' });
+    const warmUrl = warmUpUrl(script, caseId);
+    await guardRun(Promise.resolve().then(() => doWarmUp(page, profile, warmUrl)), { timeoutMs: 60000, signal, label: 'khởi động (vào app)' });
     record.trimMs = Date.now() - videoT0;
 
     stepLog = createStepLog({ t0: videoT0, onEvent: emit, print, stepPauseMs: pace.stepPauseMs });
-    const ctx = createCtx({ page, context, browser, profile, signal, stepLog, runDir, caseId, log: print });
+    // ctx.as(tên hồ sơ): thêm 1 trang của tài khoản khác cùng lúc — dữ liệu cần nhiều vai trò (người tạo ≠ người duyệt…)
+    const openAs = async (name, { url } = {}) => {
+      // tài khoản vừa tạo bằng ctx.db.createAccount → hồ sơ tạm (file phiên xoá khi case xong); còn lại = hồ sơ trong .env
+      const temp = name && typeof name === 'object';
+      const other = temp
+        ? { name: String(name.name), email: String(name.email), password: String(name.password), org: name.org || profile.org }
+        : getProfile(String(name || '').trim().toLowerCase());
+      if (temp) tempProfiles.push(other);
+      const storageState = await ensureProfileSession(browser, other);
+      const extra = await browser.newContext({ viewport: VIEWPORT, storageState });
+      extraContexts.push(extra);
+      await extra.addInitScript({ content: CURSOR_CSS_AND_JS });
+      const otherPage = guardPage(await extra.newPage());
+      otherPage.__fastdoOrg = other.org;
+      await warmUp(otherPage, other, url);
+      print(`   ⇄ mở thêm trang của hồ sơ ${other.name}`);
+      return { page: otherPage, profile: { name: other.name, org: other.org }, close: () => extra.close().catch(() => {}) };
+    };
+    const ctx = createCtx({ page, context, browser, profile, signal, stepLog, runDir, caseId, log: print, cleanups, openAs, db: qcDb.api });
     const result = await guardRun(Promise.resolve().then(() => script.module.run(ctx)), { timeoutMs, signal });
     checkContract(result, stepLog);
     record.pass = result.pass;
@@ -173,6 +230,8 @@ async function runCase({
   if (page && pace.endHoldMs > 0 && !record.cancelled) {
     await page.waitForTimeout(pace.endHoldMs).catch(() => {});
   }
+  // Video dừng ở đây — phần báo lỗi / dọn dẹp phía sau bị cắt khỏi video (video_post)
+  if (videoT0 != null) record.videoEndMs = Date.now() - videoT0;
 
   record.steps = stepLog.steps.map((s) => ({
     index: s.index,
@@ -207,6 +266,25 @@ async function runCase({
     );
   }
 
+  // Dọn sau case (trả lại cài đặt đã đổi ở B0…) — sau báo lỗi để báo lỗi còn thấy đúng màn hình lúc hỏng
+  if (page && cleanups.length) record.cleanup = await runCleanups(cleanups, { print });
+  for (const extra of extraContexts) await withTimeout(extra.close().catch(() => {}), 10000);
+  // Hoàn tác dữ liệu ctx.db đã ghi vào Mongo QC (xoá bản tạo, khôi phục bản sửa, xoá tài khoản tạm)
+  if (qcDb.used()) {
+    const restored = await withTimeout(qcDb.restoreAll(), CLEANUP_TIMEOUT_MS, [
+      { label: 'Mongo QC: hoàn tác', ok: false, error: `quá ${CLEANUP_TIMEOUT_MS / 1000}s` },
+    ]);
+    record.cleanup = [...(record.cleanup || []), ...restored];
+    restored.filter((item) => !item.ok).forEach((item) => print(`   ⚠ ${item.label} ← ${item.error}`));
+  }
+  for (const temp of tempProfiles) {
+    try {
+      fs.unlinkSync(storagePathOf(temp));
+    } catch {
+      // chưa đăng nhập được thì chưa có file phiên
+    }
+  }
+
   if (context) {
     const keepTrace = traceOn && record.verdict !== 'DAT' && record.verdict !== 'DA_HUY';
     if (traceOn) await withTimeout(context.tracing.stop(keepTrace ? { path: tracePath } : undefined).catch(() => {}), 20000);
@@ -230,4 +308,4 @@ async function runCase({
   return record;
 }
 
-module.exports = { runCase, guardRun, checkContract, withTimeout };
+module.exports = { runCase, guardRun, checkContract, withTimeout, runCleanups, warmUpUrl };

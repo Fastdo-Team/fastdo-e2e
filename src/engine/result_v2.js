@@ -52,6 +52,8 @@ function createRecord({
     steps: [],
     checks: [],
     trimMs: 0,
+    videoEndMs: null,
+    cleanup: [],
     videoPath: null,
     videoUrl: null,
     video: { webm: null, mp4: null, url: null, vtt: null },

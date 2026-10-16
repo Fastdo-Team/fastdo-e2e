@@ -4,6 +4,8 @@
 //   FASTDO_EMAIL / FASTDO_PASSWORD / ORG_NAME         → hồ sơ "default"
 //   FASTDO_EMAIL_N / FASTDO_PASSWORD_N / ORG_NAME_N   → hồ sơ "slotN" (tương thích --account=N)
 //   PROFILE_<TÊN>_EMAIL / _PASSWORD / _ORG            → hồ sơ "<tên>" (viết thường)
+//   PROFILE_<TÊN>_NOTE                                 → mô tả vai trò (vd "Nhân viên phòng Kế toán, không có quyền duyệt") —
+//                                                        AI-QC đưa vào prompt để kịch bản biết dùng tài khoản nào tạo dữ liệu
 //
 // Số luồng và hồ sơ độc lập nhau: nhiều luồng dùng chung 1 hồ sơ được. Hồ sơ chỉ cần
 // thêm khi có case đòi tài khoản / quyền / tổ chức khác. Mật khẩu KHÔNG bao giờ ra log.
@@ -52,6 +54,7 @@ function listProfiles(env = process.env) {
       email: val(key),
       password: env[`PROFILE_${raw}_PASSWORD`] || '',
       org: val(`PROFILE_${raw}_ORG`) || baseOrg,
+      note: val(`PROFILE_${raw}_NOTE`),
       source: key,
     });
   }
@@ -92,7 +95,7 @@ function storagePathOf(profile) {
 
 /** Bản an toàn để hiển thị / ghi log — không bao giờ có mật khẩu */
 function publicProfile(p) {
-  return { name: p.name, email: p.email, org: p.org, source: p.source, hasPassword: Boolean(p.password) };
+  return { name: p.name, email: p.email, org: p.org, note: p.note || '', source: p.source, hasPassword: Boolean(p.password) };
 }
 
 module.exports = { listProfiles, getProfile, profileForAccount, storagePathOf, publicProfile, NAME_RE, FALLBACK_ORG };

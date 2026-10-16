@@ -44,6 +44,7 @@ const KNOWN_FLAGS = [
 // Mã case đi thẳng vào path.join() rồi require(), nên chuỗi tự do ở đây là thực thi mã
 // tuỳ ý. Chỉ nhận đúng dạng mã (engine/case_id.js): EVAL_… hoặc case theo ticket 1295-QC01.
 const { isCaseId } = require('./engine/case_id');
+const { takeDryBudget } = require('./engine/dry_budget');
 
 class ArgError extends Error {}
 
@@ -228,6 +229,24 @@ async function main() {
       .forEach((f) => console.error(`          - ${f.replace('.test.js', '').toUpperCase()}`));
     process.exitCode = 1;
     return;
+  }
+  // Phiên tái hiện AI-QC: trần số lần chạy nháp mỗi case (dry_budget) — hết lượt thì từ chối case đó
+  if (o.mode === 'nhap') {
+    const quota = takeDryBudget(o.caseIds);
+    if (quota.budget) {
+      for (const id of quota.allowed) console.log(`[AIQC] ${id}: lần chạy nháp ${quota.counts[id]}/${quota.budget}`);
+      for (const id of quota.refused) {
+        console.error(
+          `[AIQC] ${id}: đã chạy nháp ${quota.budget}/${quota.budget} lần — HẾT LƯỢT, lệnh không chạy case này. Lần chạy trước đã ` +
+            'có kết quả hợp lệ thì đặt ready: true; chưa thì để ready: false + blocker (lý do cụ thể) rồi sang case khác.'
+        );
+      }
+      o.caseIds = quota.allowed;
+      if (!o.caseIds.length) {
+        process.exitCode = 3;
+        return;
+      }
+    }
   }
   // Thiếu biến bắt buộc thì dừng NGAY, đừng để lỗi nổ sau khi đã quay xong video.
   try {

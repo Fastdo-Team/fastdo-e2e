@@ -73,6 +73,35 @@ async function detectState(page, org) {
   return null;
 }
 
+/**
+ * Sau khi bấm Đăng nhập: 'org' = màn chọn tổ chức có đúng tổ chức của hồ sơ; 'app' = đã vào thẳng app (tài khoản chỉ thuộc
+ * 1 tổ chức); null = hết hạn chờ (sai email / mật khẩu…). Dò theo nhịp thay vì đua 2 lệnh chờ — không để lại promise bị bỏ rơi.
+ */
+async function waitAfterLogin(page, org, timeoutMs = 25000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (await page.$('xpath=' + orgXPath(org))) return 'org';
+      const inApp = await page.evaluate(
+        () =>
+          !location.pathname.toLowerCase().includes('login') &&
+          !document.querySelector('input[type="password"]') &&
+          !document.body.innerText.includes('Loading data') &&
+          document.body.innerText.trim().length > 200
+      );
+      // màn chọn tổ chức render dần — chờ thêm 1 nhịp rồi kiểm lại trước khi kết luận đã vào thẳng app
+      if (inApp) {
+        await sleep(1200);
+        return (await page.$('xpath=' + orgXPath(org))) ? 'org' : 'app';
+      }
+    } catch {
+      /* đang chuyển trang — thử lại nhịp sau */
+    }
+    await sleep(500);
+  }
+  return null;
+}
+
 async function performFullLogin(page, profile) {
   await gotoApp(page);
   await passTunnelWarning(page);
@@ -109,10 +138,14 @@ async function performFullLogin(page, profile) {
     if (!submit) throw new Error('Không tìm thấy nút gửi form Đăng nhập');
     console.log(`[AUTH] ${profile.name}: đã gửi thông tin đăng nhập, chờ màn chọn tổ chức…`);
     await humanClick(page, submit);
-    try {
-      await page.waitForSelector('xpath=' + orgXPath(profile.org), { timeout: 25000, state: 'attached' });
-    } catch {
+    const after = await waitAfterLogin(page, profile.org);
+    if (!after) {
       throw new Error(`Đăng nhập xong không thấy tổ chức "${profile.org}" — sai email/mật khẩu, hoặc sai ORG của hồ sơ ${profile.name}?`);
+    }
+    if (after === 'app') {
+      // Tài khoản chỉ thuộc 1 công ty (vd tài khoản tạm ctx.db.createAccount) → Fastdo vào thẳng app, không qua màn chọn
+      console.log(`[AUTH] ${profile.name}: vào thẳng app (chỉ thuộc 1 tổ chức)`);
+      return;
     }
     state = 'org-selection';
   }

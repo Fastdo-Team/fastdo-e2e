@@ -144,9 +144,11 @@ function runFfmpeg(args, { cwd, timeoutMs = 180000, ffmpeg = 'ffmpeg' } = {}) {
  * webm → mp4 + dải phụ đề bước. Ghi steps.ass + steps.vtt cạnh video.
  * @returns {Promise<{mp4: string, vtt: string, ass: string}>}
  */
-function renderCaseVideo({ runDir, webmName = 'video.webm', mp4Name, caseId, steps, trimMs = 0, durationMs = 0 }) {
+function renderCaseVideo({ runDir, webmName = 'video.webm', mp4Name, caseId, steps, trimMs = 0, durationMs = 0, endMs = null }) {
   return limit(async () => {
-    const cues = buildCaptions({ caseId, steps, trimMs, durationMs });
+    const cues = buildCaptions({ caseId, steps, trimMs, durationMs: endMs || durationMs });
+    // endMs: hết phần giữ khung cuối — báo lỗi / dọn dẹp sau đó không đưa vào video
+    const cut = endMs && endMs > trimMs ? ['-t', ((endMs - trimMs) / 1000).toFixed(3)] : [];
     fs.writeFileSync(path.join(runDir, 'steps.ass'), toAss(cues), 'utf8');
     fs.writeFileSync(path.join(runDir, 'steps.vtt'), toVtt(cues), 'utf8');
     await runFfmpeg(
@@ -157,6 +159,7 @@ function renderCaseVideo({ runDir, webmName = 'video.webm', mp4Name, caseId, ste
         '-vf', `pad=${WIDTH}:${HEIGHT + BAND}:0:0:black,subtitles=steps.ass`,
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
         '-movflags', '+faststart', '-an',
+        ...cut,
         mp4Name,
       ],
       { cwd: runDir }

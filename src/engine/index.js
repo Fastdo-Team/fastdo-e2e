@@ -181,6 +181,7 @@ async function runBatch(opts, { print = console.log, onEvent = () => {}, signal 
               steps: record.steps,
               trimMs: record.trimMs,
               durationMs: record.durationMs,
+              endMs: record.videoEndMs,
             })
           );
           record.video.mp4 = out.mp4;

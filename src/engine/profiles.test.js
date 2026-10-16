@@ -45,3 +45,11 @@ test('publicProfile không bao giờ có mật khẩu', () => {
 test('file phiên theo tên hồ sơ, không đụng file Puppeteer cũ', () => {
   assert.match(P.storagePathOf({ name: 'nhanvien' }), /[\\/]\.auth[\\/]nhanvien\.json$/);
 });
+
+test('PROFILE_<TÊN>_NOTE → mô tả vai trò của hồ sơ; bản công khai có note, không có mật khẩu', () => {
+  const env = { PROFILE_NHANVIEN_EMAIL: 'nv@x.vn', PROFILE_NHANVIEN_PASSWORD: 'p', PROFILE_NHANVIEN_NOTE: ' Nhân viên, không có quyền duyệt ' };
+  const p = P.listProfiles(env).get('nhanvien');
+  assert.strictEqual(p.note, 'Nhân viên, không có quyền duyệt');
+  assert.strictEqual('password' in P.publicProfile(p), false);
+  assert.strictEqual(P.publicProfile(p).note, 'Nhân viên, không có quyền duyệt');
+});
