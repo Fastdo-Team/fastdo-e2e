@@ -179,9 +179,11 @@ async function runBatch(opts, { print = console.log, onEvent = () => {}, signal 
               mp4Name: `${caseId}_AutoRecord.mp4`,
               caseId,
               steps: record.steps,
+              actions: record.actions,
               trimMs: record.trimMs,
               durationMs: record.durationMs,
               endMs: record.videoEndMs,
+              closeMs: record.videoCloseMs,
             })
           );
           record.video.mp4 = out.mp4;

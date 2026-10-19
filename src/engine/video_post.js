@@ -1,6 +1,7 @@
 // ============================================================================
-// video_post.js: hậu kỳ video 1 case — webm (Playwright) → mp4 H.264 có DẢI PHỤ ĐỀ BƯỚC
-// đặt DƯỚI khung hình (đệm 60px, không đè lên app), kèm steps.vtt cho trình phát của UI.
+// video_post.js: hậu kỳ video 1 case — webm (Playwright) → mp4 H.264 có DẢI PHỤ ĐỀ đặt DƯỚI khung
+// hình (đệm 96px, không đè lên app): dòng trên = bước đang chạy, dòng dưới = thao tác đang làm
+// (action_trace — «Bấm «Lưu»», «Chọn «…» ở «…»»). Kèm steps.vtt cho trình phát của UI.
 //
 // Phần "khởi động" (vào app, chọn tổ chức) được cắt khỏi đầu video như video cũ vốn
 // không có bước đăng nhập. ffmpeg chạy với cwd = thư mục run và tên file tương đối — tránh
@@ -13,7 +14,7 @@ const { spawn } = require('child_process');
 
 const WIDTH = 1280;
 const HEIGHT = 720;
-const BAND = 60;
+const BAND = 96;
 const two = (n) => String(n).padStart(2, '0');
 
 function mmss(ms) {
@@ -66,7 +67,29 @@ function buildCaptions({ caseId, steps = [], trimMs = 0, durationMs = 0 }) {
   return cues;
 }
 
-function toAss(cues) {
+/**
+ * Phụ đề thao tác (dòng dưới): mỗi thao tác hiện tới thao tác kế tiếp, hết bước thì tắt (bước mới chưa có thao tác).
+ * Mốc thời gian đã trừ phần khởi động bị cắt đầu video.
+ */
+function buildActionCaptions({ actions = [], steps = [], trimMs = 0, durationMs = 0 }) {
+  const end = Math.max(1000, durationMs - trimMs);
+  const stepStarts = steps.map((s) => Math.max(0, (s.startMs || 0) - trimMs)).sort((a, b) => a - b);
+  const list = actions
+    .filter((a) => a && a.text)
+    .map((a) => ({ ...a, start: Math.max(0, (a.ms || 0) - trimMs) }))
+    .filter((a) => a.start < end)
+    .sort((a, b) => a.start - b.start);
+  const cues = [];
+  list.forEach((a, i) => {
+    const nextStep = stepStarts.find((s) => s > a.start);
+    const stop = Math.min(list[i + 1] ? list[i + 1].start : end, nextStep == null ? end : nextStep, end);
+    if (stop <= a.start) return;
+    cues.push({ startMs: a.start, endMs: stop, text: `${cut(String(a.text), 85)}${a.ok === false ? ' ✗' : ''}` });
+  });
+  return cues;
+}
+
+function toAss(cues, actionCues = []) {
   const head = [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -79,13 +102,14 @@ function toAss(cues) {
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, ' +
       'Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, ' +
       'MarginR, MarginV, Encoding',
-    'Style: Buoc,Arial,26,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,1,20,20,17,1',
+    'Style: Buoc,Arial,22,&H00BEBEBE,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,1,20,20,58,1',
+    'Style: ThaoTac,Arial,28,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,0,0,1,20,20,16,1',
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
-  const lines = cues.map((c) => `Dialogue: 0,${assTime(c.startMs)},${assTime(c.endMs)},Buoc,,0,0,0,,${assText(c.text)}`);
-  return `${[...head, ...lines].join('\n')}\n`;
+  const line = (style) => (c) => `Dialogue: 0,${assTime(c.startMs)},${assTime(c.endMs)},${style},,0,0,0,,${assText(c.text)}`;
+  return `${[...head, ...cues.map(line('Buoc')), ...actionCues.map(line('ThaoTac'))].join('\n')}\n`;
 }
 
 function toVtt(cues) {
@@ -140,21 +164,75 @@ function runFfmpeg(args, { cwd, timeoutMs = 180000, ffmpeg = 'ffmpeg' } = {}) {
   });
 }
 
+/** Mốc time= cuối cùng trong stderr của ffmpeg (ms); không có → null */
+function parseFfmpegTime(text) {
+  const all = [...String(text || '').matchAll(/time=(\d+):(\d\d):(\d\d(?:\.\d+)?)/g)];
+  if (!all.length) return null;
+  const [, h, m, s] = all[all.length - 1];
+  return Math.round((Number(h) * 3600 + Number(m) * 60 + Number(s)) * 1000);
+}
+
+/** Độ dài thật của webm — chép luồng sang null (không giải mã, ~0,1s); lỗi → null */
+function probeDurationMs(file, { cwd, ffmpeg = 'ffmpeg', timeoutMs = 30000 } = {}) {
+  return new Promise((resolve) => {
+    let err = '';
+    const child = spawn(ffmpeg, ['-hide_banner', '-i', file, '-map', '0:v:0', '-c', 'copy', '-f', 'null', '-'], { cwd, windowsHide: true });
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve(null);
+    }, timeoutMs);
+    child.stderr.on('data', (d) => {
+      err = (err + d).slice(-4000);
+    });
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 ? parseFfmpegTime(err) : null);
+    });
+  });
+}
+
 /**
- * webm → mp4 + dải phụ đề bước. Ghi steps.ass + steps.vtt cạnh video.
+ * Video bắt đầu quay MUỘN hơn mốc 0 của engine (videoT0, lấy ngay sau newPage) chừng 0,3–0,6s — khung hình đầu chỉ có khi
+ * trình duyệt vẽ xong. Không bù thì cắt đầu video lố đúng chừng đó và phụ đề chậm hơn hình. Đo bằng độ dài thật:
+ * webm dài (closeMs − độ trễ), closeMs = lúc đóng context theo mốc engine. Không đo được → 0 (như cũ).
+ */
+function videoStartDelayMs({ closeMs, durationMs, trimMs }) {
+  if (closeMs == null || !durationMs) return 0;
+  return Math.min(Math.max(0, closeMs - durationMs), Math.max(0, trimMs));
+}
+
+/**
+ * webm → mp4 + dải phụ đề bước + thao tác. Ghi steps.ass + steps.vtt cạnh video.
  * @returns {Promise<{mp4: string, vtt: string, ass: string}>}
  */
-function renderCaseVideo({ runDir, webmName = 'video.webm', mp4Name, caseId, steps, trimMs = 0, durationMs = 0, endMs = null }) {
+function renderCaseVideo({
+  runDir,
+  webmName = 'video.webm',
+  mp4Name,
+  caseId,
+  steps,
+  actions = [],
+  trimMs = 0,
+  durationMs = 0,
+  endMs = null,
+  closeMs = null,
+}) {
   return limit(async () => {
+    const delayMs = closeMs == null ? 0 : videoStartDelayMs({ closeMs, durationMs: await probeDurationMs(webmName, { cwd: runDir }), trimMs });
     const cues = buildCaptions({ caseId, steps, trimMs, durationMs: endMs || durationMs });
+    const actionCues = buildActionCaptions({ actions, steps, trimMs, durationMs: endMs || durationMs });
     // endMs: hết phần giữ khung cuối — báo lỗi / dọn dẹp sau đó không đưa vào video
     const cut = endMs && endMs > trimMs ? ['-t', ((endMs - trimMs) / 1000).toFixed(3)] : [];
-    fs.writeFileSync(path.join(runDir, 'steps.ass'), toAss(cues), 'utf8');
-    fs.writeFileSync(path.join(runDir, 'steps.vtt'), toVtt(cues), 'utf8');
+    fs.writeFileSync(path.join(runDir, 'steps.ass'), toAss(cues, actionCues), 'utf8');
+    fs.writeFileSync(path.join(runDir, 'steps.vtt'), toVtt([...cues, ...actionCues].sort((a, b) => a.startMs - b.startMs)), 'utf8');
     await runFfmpeg(
       [
         '-y', '-hide_banner', '-loglevel', 'error',
-        '-ss', (Math.max(0, trimMs) / 1000).toFixed(3),
+        '-ss', (Math.max(0, trimMs - delayMs) / 1000).toFixed(3),
         '-i', webmName,
         '-vf', `pad=${WIDTH}:${HEIGHT + BAND}:0:0:black,subtitles=steps.ass`,
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',
@@ -170,6 +248,7 @@ function renderCaseVideo({ runDir, webmName = 'video.webm', mp4Name, caseId, ste
 
 module.exports = {
   buildCaptions,
+  buildActionCaptions,
   toAss,
   toVtt,
   mmss,
@@ -177,6 +256,9 @@ module.exports = {
   vttTime,
   createLimiter,
   runFfmpeg,
+  parseFfmpegTime,
+  probeDurationMs,
+  videoStartDelayMs,
   renderCaseVideo,
   WIDTH,
   HEIGHT,

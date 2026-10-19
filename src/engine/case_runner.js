@@ -20,6 +20,7 @@ const { getProfile, storagePathOf } = require('./profiles');
 const { createQcDb } = require('./qc_db');
 const { createStepLog } = require('./steps');
 const { paceFor } = require('./video_pace');
+const { createActionTrace, installActionHooks } = require('./action_trace');
 const { createCtx } = require('./ctx');
 const { createRecord, verdictOf } = require('./result_v2');
 const { ticketOf } = require('./case_id');
@@ -160,6 +161,7 @@ async function runCase({
   const tempProfiles = [];
   const qcDb = createQcDb({ profile, targetUrl: config.TARGET_URL, print });
   let videoT0 = null;
+  let trace = null;
   const pace = paceFor(opts.record);
   const timeoutMs = (opts.caseTimeoutSec || script.meta.timeoutSec) * 1000;
   // E2E_TRACE=0: phiên tái hiện AI-QC chạy nháp hàng chục lần, chỉ đọc *.fail.md + dump — trace làm chậm mỗi lần
@@ -185,6 +187,13 @@ async function runCase({
     const warmUrl = warmUpUrl(script, caseId);
     await guardRun(Promise.resolve().then(() => doWarmUp(page, profile, warmUrl)), { timeoutMs: 60000, signal, label: 'khởi động (vào app)' });
     record.trimMs = Date.now() - videoT0;
+
+    // Lượt quay video: mỗi thao tác trên trang chính thành 1 dòng chú thích dưới video, con trỏ lướt chậm tới trước (action_trace)
+    if (opts.record) {
+      if (!(await installActionHooks(page))) print('   ⚠ không bật được chú thích thao tác — video chỉ có phụ đề bước');
+      trace = createActionTrace({ page, t0: videoT0, cursorMs: pace.cursorMs, pauseMs: pace.actionPauseMs });
+      page.__fastdoTrace = trace;
+    }
 
     stepLog = createStepLog({ t0: videoT0, onEvent: emit, print, stepPauseMs: pace.stepPauseMs });
     // ctx.as(tên hồ sơ): thêm 1 trang của tài khoản khác cùng lúc — dữ liệu cần nhiều vai trò (người tạo ≠ người duyệt…)
@@ -232,6 +241,8 @@ async function runCase({
   }
   // Video dừng ở đây — phần báo lỗi / dọn dẹp phía sau bị cắt khỏi video (video_post)
   if (videoT0 != null) record.videoEndMs = Date.now() - videoT0;
+  if (page) page.__fastdoTrace = null;
+  record.actions = trace ? trace.actions.filter((a) => a.text) : [];
 
   record.steps = stepLog.steps.map((s) => ({
     index: s.index,
@@ -290,6 +301,8 @@ async function runCase({
     if (traceOn) await withTimeout(context.tracing.stop(keepTrace ? { path: tracePath } : undefined).catch(() => {}), 20000);
     if (keepTrace && fs.existsSync(tracePath)) record.trace = tracePath;
     const video = page && opts.record ? page.video() : null;
+    // mốc đóng context (= hết video) — video_post đo độ trễ bắt đầu quay của webm theo mốc này
+    if (videoT0 != null) record.videoCloseMs = Date.now() - videoT0;
     await withTimeout(context.close().catch(() => {}), 20000);
     if (video) {
       const raw = await withTimeout(video.path().catch(() => null), 10000);

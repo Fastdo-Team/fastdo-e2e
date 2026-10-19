@@ -11,7 +11,7 @@ function initFakeCursorOverlay() {
   style.textContent = \`
     #__fake_cursor {
       position: fixed; width: 22px; height: 22px; border-radius: 50%;
-      background: rgba(255, 45, 85, 0.95); border: 2.5px solid #ffffff;
+      background: rgba(255, 45, 85, 0.55); border: 2.5px solid #ffffff;
       box-shadow: 0 2px 8px rgba(0,0,0,0.6);
       pointer-events: none; z-index: 2147483647;
       transform: translate(-50%, -50%);
@@ -49,6 +49,31 @@ function initFakeCursorOverlay() {
   );
 }
 
+// Con trỏ ảo lướt từ (fx, fy) tới (tx, ty) trong ms (nhanh dần rồi chậm dần) — chỉ con trỏ vẽ, không đụng chuột thật.
+// Dùng khi quay video (engine/action_trace.js) để người xem thấy con trỏ đi tới chỗ sắp thao tác.
+window.__fastdoGlide = function (fx, fy, tx, ty, ms) {
+  return new Promise(function (resolve) {
+    var cursor = document.getElementById('__fake_cursor');
+    if (!cursor) return resolve();
+    var place = function (x, y) { cursor.style.left = x + 'px'; cursor.style.top = y + 'px'; };
+    var ease = function (t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; };
+    var start = performance.now();
+    var finished = false;
+    var finish = function () { if (finished) return; finished = true; place(tx, ty); resolve(); };
+    // trang không vẽ khung (rAF bị dừng) vẫn kết thúc đúng hạn
+    setTimeout(finish, ms + 150);
+    place(fx, fy);
+    var frame = function (now) {
+      if (finished) return;
+      var t = Math.min(1, (now - start) / ms);
+      var k = ease(t);
+      place(fx + (tx - fx) * k, fy + (ty - fy) * k);
+      if (t < 1) requestAnimationFrame(frame); else finish();
+    };
+    requestAnimationFrame(frame);
+  });
+};
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initFakeCursorOverlay);
 } else {
@@ -64,6 +89,8 @@ if (document.readyState === 'loading') {
  */
 async function smoothMove(page, targetX, targetY, steps = 8) {
   const { x: sx, y: sy } = page.__fastdoMouse || { x: 100, y: 100 };
+  // chuột thật đã ở đích (action_trace vừa lướt con trỏ tới) — không lặp 8 nhịp tại chỗ
+  if (Math.abs(targetX - sx) < 1 && Math.abs(targetY - sy) < 1) return;
   for (let i = 1; i <= steps; i++) {
     const ix = sx + (targetX - sx) * (i / steps);
     const iy = sy + (targetY - sy) * (i / steps);
@@ -71,10 +98,12 @@ async function smoothMove(page, targetX, targetY, steps = 8) {
     await new Promise((r) => setTimeout(r, 10));
   }
   page.__fastdoMouse = { x: targetX, y: targetY };
+  page.__fastdoCursor = page.__fastdoMouse;
 }
 
 /**
- * Click chuột có con trỏ ảo di chuyển tới và hiệu ứng sóng tỏa ra
+ * Click chuột có con trỏ ảo di chuyển tới và hiệu ứng sóng tỏa ra.
+ * Trang đang quay video (page.__fastdoTrace — engine/action_trace.js): ghi dòng chú thích «Bấm …», con trỏ lướt chậm tới trước.
  */
 async function humanClick(page, elementOrSelector, opts = {}) {
   let element = elementOrSelector;
@@ -92,6 +121,11 @@ async function humanClick(page, elementOrSelector, opts = {}) {
     throw new Error(`Không tìm thấy phần tử để click: ${elementOrSelector}`);
   }
 
+  if (page.__fastdoTrace) return page.__fastdoTrace.run('click', element, {}, () => clickElement(page, element, opts));
+  return clickElement(page, element, opts);
+}
+
+async function clickElement(page, element, opts) {
   await element.scrollIntoViewIfNeeded();
   await new Promise((r) => setTimeout(r, 80));
 
@@ -116,9 +150,14 @@ async function humanClick(page, elementOrSelector, opts = {}) {
  * Nhập văn bản nhanh nhưng tự nhiên (delay 15ms/ký tự)
  */
 async function humanType(page, elementOrSelector, text, opts = {}) {
-  await humanClick(page, elementOrSelector, { pauseAfter: 80 });
-  await page.keyboard.type(text, { delay: opts.delay ?? 15 });
-  await new Promise((r) => setTimeout(r, 80));
+  const typeInto = async () => {
+    await humanClick(page, elementOrSelector, { pauseAfter: 80 });
+    await page.keyboard.type(text, { delay: opts.delay ?? 15 });
+    await new Promise((r) => setTimeout(r, 80));
+  };
+  // đang quay video: 1 dòng «Gõ … vào …» cho cả bấm + gõ (thao tác lồng bên trong không ghi thêm)
+  if (page.__fastdoTrace) return page.__fastdoTrace.run('type', elementOrSelector, { value: text, pointer: true }, typeInto);
+  return typeInto();
 }
 
 /**
