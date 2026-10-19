@@ -8,6 +8,7 @@
 //   npm run aiqc -- upload  --file video.mp4 --name aiqc-1295-truoc.mp4
 //   npm run aiqc -- scripts --ticket 1295       kịch bản của ticket: { id, ready, blocker, problems } (agent chỉ chạy case ready)
 //   npm run aiqc -- reset-ready --ticket 1295   bỏ «ready: true» trước phiên tái hiện — lượt nào cũng phải chạy nháp lại
+//   npm run aiqc -- restore-valid --ticket 1295 --ledger <sổ chạy nháp>   case chưa sẵn sàng → dùng bản chạy nháp hợp lệ gần nhất
 //   npm run aiqc -- helpers                     hàm tạo dữ liệu dùng chung (testcases/tickets/lib) cho prompt tái hiện
 //   npm run aiqc -- profiles                    tài khoản thử KHÁC cùng tổ chức (tên + vai trò, không email / mật khẩu) cho ctx.as
 //   npm run aiqc -- setup-template      (1 lần: thêm ô «AI soạn thêm testcase» vào _Mẫu + mục 11 tab Hướng dẫn)
@@ -21,7 +22,9 @@ const fs = require('fs');
 const config = require('../config');
 const { createSheetsClient } = require('../sheets/sheets_client');
 const T = require('../sheets/ticket_tab');
-const { listTicketScripts, resetTicketReady, listHelpers } = require('../engine/script_meta');
+const path = require('path');
+const { listTicketScripts, resetTicketReady, listHelpers, TESTCASE_DIR } = require('../engine/script_meta');
+const { restoreValidSnapshots } = require('../engine/valid_snapshot');
 const { listProfiles, profileForAccount } = require('../engine/profiles');
 
 class UsageError extends Error {}
@@ -112,12 +115,18 @@ async function run(command, flags) {
       return { reset: resetTicketReady(need(flags, 'ticket')) };
     case 'helpers':
       return { helpers: listHelpers() };
+    case 'restore-valid': {
+      const ticket = need(flags, 'ticket');
+      return {
+        restored: restoreValidSnapshots(listTicketScripts(ticket), need(flags, 'ledger'), path.join(TESTCASE_DIR, 'tickets')),
+      };
+    }
     case 'profiles':
       return otherProfiles();
     default:
       if (command === 'setup-template') return T.setupTemplate(sheetsClient());
       throw new UsageError(
-        `Lệnh không hợp lệ: "${command}" — prepare | results | state | upload | scripts | reset-ready | helpers | profiles | setup-template`
+        `Lệnh không hợp lệ: "${command}" — prepare | results | state | upload | scripts | reset-ready | restore-valid | helpers | profiles | setup-template`
       );
   }
 }

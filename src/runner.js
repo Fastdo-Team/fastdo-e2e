@@ -45,6 +45,7 @@ const KNOWN_FLAGS = [
 // tuỳ ý. Chỉ nhận đúng dạng mã (engine/case_id.js): EVAL_… hoặc case theo ticket 1295-QC01.
 const { isCaseId } = require('./engine/case_id');
 const { takeDryBudget } = require('./engine/dry_budget');
+const { saveValidSnapshots } = require('./engine/valid_snapshot');
 
 class ArgError extends Error {}
 
@@ -231,8 +232,9 @@ async function main() {
     return;
   }
   // Phiên tái hiện AI-QC: trần số lần chạy nháp mỗi case (dry_budget) — hết lượt thì từ chối case đó
+  let quota = null;
   if (o.mode === 'nhap') {
-    const quota = takeDryBudget(o.caseIds);
+    quota = takeDryBudget(o.caseIds);
     if (quota.budget) {
       for (const id of quota.allowed) console.log(`[AIQC] ${id}: lần chạy nháp ${quota.counts[id]}/${quota.budget}`);
       for (const id of quota.refused) {
@@ -282,6 +284,17 @@ async function main() {
     process.removeListener('SIGINT', onSigint);
   }
   printSummary(out.records, out.seconds, out.timings);
+
+  // Phiên tái hiện AI-QC: giữ bản kịch bản của lần chạy nháp hợp lệ (valid_snapshot) — hết phiên mà AI chưa đánh dấu ready thì
+  // agent dùng lại bản này (ticket 1308: lượt 7 hợp lệ, AI sửa tiếp làm hỏng rồi hết lượt)
+  if (quota && quota.budget) {
+    for (const item of saveValidSnapshots(out.records, quota.counts, findScriptFile)) {
+      console.log(
+        `[AIQC] ${item.id}: lượt chạy nháp ${item.run} ra kết quả hợp lệ (${item.verdict}) — đã giữ bản kịch bản này. ` +
+          'Đúng ý thì đặt ready: true ngay rồi mới tinh chỉnh.'
+      );
+    }
+  }
 
   // Bản kê của cả lệnh: giao diện đọc file này để biết lệnh vừa rồi chạy những case nào.
   if (o.reportJson) {
