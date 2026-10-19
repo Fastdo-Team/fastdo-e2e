@@ -240,7 +240,8 @@ function renderCaseVideo({
         ...cut,
         mp4Name,
       ],
-      { cwd: runDir }
+      // video dài (case chờ giờ hẹn ~10 phút) cần lâu hơn 3 phút mặc định: thêm nửa độ dài video
+      { cwd: runDir, timeoutMs: 180000 + Math.max(0, (endMs || durationMs) - trimMs) / 2 }
     );
     return { mp4: path.join(runDir, mp4Name), vtt: path.join(runDir, 'steps.vtt'), ass: path.join(runDir, 'steps.ass') };
   });

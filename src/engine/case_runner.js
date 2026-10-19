@@ -26,6 +26,7 @@ const { createRecord, verdictOf } = require('./result_v2');
 const { ticketOf } = require('./case_id');
 
 const CLEANUP_TIMEOUT_MS = 90000;
+const VIDEO_CLOSE_TIMEOUT_MS = 300000;
 
 const errMsg = (err) => (err && err.message ? String(err.message) : String(err));
 
@@ -91,6 +92,27 @@ async function runCleanups(cleanups, { print = console.log, timeoutMs = CLEANUP_
     }
   }
   return out;
+}
+
+/**
+ * Đổi tên webm Playwright vừa ghi thành video.webm. File còn bị giữ (Playwright / phần mềm quét chưa nhả) thì thử lại; vẫn không
+ * được thì dùng nguyên file cũ (cùng thư mục run). Không bao giờ ném lỗi — lỗi video không được làm mất kết quả kiểm thử.
+ */
+async function moveVideo(raw, target, { print = console.log, attempts = 10, waitMs = 3000, rename = fs.renameSync } = {}) {
+  if (path.resolve(raw) === path.resolve(target)) return target;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      rename(raw, target);
+      return target;
+    } catch (err) {
+      if (attempt === attempts) {
+        print(`   ⚠ không đổi tên được video (${err.code || err.message}) — dùng nguyên file ${path.basename(raw)}`);
+        return raw;
+      }
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+    }
+  }
+  return raw;
 }
 
 /** Kiểm hợp đồng kết quả; vi phạm → ném lỗi HỢP ĐỒNG KỊCH BẢN (không bao giờ thành kết quả kiểm thử) */
@@ -303,12 +325,13 @@ async function runCase({
     const video = page && opts.record ? page.video() : null;
     // mốc đóng context (= hết video) — video_post đo độ trễ bắt đầu quay của webm theo mốc này
     if (videoT0 != null) record.videoCloseMs = Date.now() - videoT0;
-    await withTimeout(context.close().catch(() => {}), 20000);
+    // Có quay video: đóng context = Playwright mã hoá nốt khung hình còn đợi. Case đứng yên lâu (chờ giờ nhắc ~11 phút, ticket 1338)
+    // dồn cả chục nghìn khung — 20s không đủ, file webm còn bị giữ lúc đổi tên → EBUSY làm chết cả lượt chạy, không có bản kê
+    await withTimeout(context.close().catch(() => {}), video ? VIDEO_CLOSE_TIMEOUT_MS : 20000);
     if (video) {
       const raw = await withTimeout(video.path().catch(() => null), 10000);
       if (raw && fs.existsSync(raw)) {
-        const webm = path.join(runDir, 'video.webm');
-        if (path.resolve(raw) !== path.resolve(webm)) fs.renameSync(raw, webm);
+        const webm = await moveVideo(raw, path.join(runDir, 'video.webm'), { print });
         record.video.webm = webm;
         record.videoPath = webm;
       }
@@ -321,4 +344,4 @@ async function runCase({
   return record;
 }
 
-module.exports = { runCase, guardRun, checkContract, withTimeout, runCleanups, warmUpUrl };
+module.exports = { runCase, guardRun, checkContract, withTimeout, runCleanups, warmUpUrl, moveVideo };

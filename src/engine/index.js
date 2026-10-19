@@ -176,6 +176,8 @@ async function runBatch(opts, { print = console.log, onEvent = () => {}, signal 
           const out = await phase(`${caseId} · hậu kỳ video`, () =>
             renderCaseVideo({
               runDir: record.runDir,
+              // thường là video.webm; đổi tên lỗi (file còn bị giữ) thì case_runner giữ nguyên tên Playwright đặt
+              webmName: path.basename(record.video.webm),
               mp4Name: `${caseId}_AutoRecord.mp4`,
               caseId,
               steps: record.steps,
