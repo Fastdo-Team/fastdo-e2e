@@ -141,7 +141,11 @@ function createLimiter(max) {
 
 const limit = createLimiter(2);
 
-function runFfmpeg(args, { cwd, timeoutMs = 180000, ffmpeg = 'ffmpeg' } = {}) {
+/** ffmpeg dùng cho hậu kỳ: biến FFMPEG_PATH (agent đặt qua E2E.Env khi máy chưa có ffmpeg trong PATH — server SVC, 2026-10-20: mọi case
+ * «spawn ffmpeg ENOENT» → không có mp4 / dải chú thích), không có thì gọi «ffmpeg» theo PATH. */
+const ffmpegBin = () => process.env.FFMPEG_PATH || 'ffmpeg';
+
+function runFfmpeg(args, { cwd, timeoutMs = 180000, ffmpeg = ffmpegBin() } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpeg, args, { cwd, windowsHide: true });
     let err = '';
@@ -154,7 +158,8 @@ function runFfmpeg(args, { cwd, timeoutMs = 180000, ffmpeg = 'ffmpeg' } = {}) {
     }, timeoutMs);
     child.on('error', (e) => {
       clearTimeout(timer);
-      reject(new Error(`không chạy được ffmpeg: ${e.message}`));
+      const hint = e.code === 'ENOENT' ? ' — máy chưa có ffmpeg: cài ffmpeg rồi đặt FFMPEG_PATH (hoặc thêm vào PATH)' : '';
+      reject(new Error(`không chạy được ffmpeg: ${e.message}${hint}`));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
@@ -173,7 +178,7 @@ function parseFfmpegTime(text) {
 }
 
 /** Độ dài thật của webm — chép luồng sang null (không giải mã, ~0,1s); lỗi → null */
-function probeDurationMs(file, { cwd, ffmpeg = 'ffmpeg', timeoutMs = 30000 } = {}) {
+function probeDurationMs(file, { cwd, ffmpeg = ffmpegBin(), timeoutMs = 30000 } = {}) {
   return new Promise((resolve) => {
     let err = '';
     const child = spawn(ffmpeg, ['-hide_banner', '-i', file, '-map', '0:v:0', '-c', 'copy', '-f', 'null', '-'], { cwd, windowsHide: true });
