@@ -59,7 +59,7 @@ function createStepLog({
   }
 
   function check(label, ok, detail = {}) {
-    const item = { label: String(label), ok: Boolean(ok), expected: detail.expected, actual: detail.actual };
+    const item = { label: String(label), ok: Boolean(ok), expected: plainValue(detail.expected), actual: plainValue(detail.actual) };
     checks.push(item);
     print(`   ${item.ok ? '✓' : '✗'} kiểm: ${item.label}`);
     return item.ok;
@@ -75,4 +75,21 @@ function createStepLog({
   return { steps, checks, mark, step, check, finish, failedChecks };
 }
 
-module.exports = { createStepLog };
+/**
+ * Giá trị expected / actual của ctx.check về dạng ghi được ra JSON. result.json ghi bằng JSON.stringify: BigInt (ticks đọc từ ctx.db) hay
+ * vòng tham chiếu (Locator, ElementHandle…) làm writeRecord ném lỗi → sập cả lượt chạy, mất kết quả MỌI case (kể cả case đã xong).
+ */
+function plainValue(value) {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(value, (key, item) => (typeof item === 'bigint' ? `${item}n` : item)));
+  } catch {
+    try {
+      return String(value);
+    } catch {
+      return '(không đọc được giá trị)';
+    }
+  }
+}
+
+module.exports = { createStepLog, plainValue };

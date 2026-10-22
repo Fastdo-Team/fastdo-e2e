@@ -6,7 +6,7 @@
 //   ✗ B3 Bấm Kích hoạt ← hệ thống chặn: "…"
 //   • Banner chỉ xem: không (mong muốn: có) ✗
 //   Kết luận: KHÔNG ĐẠT (QC xác nhận lỗi app) — <resultText của kịch bản>
-//   - Video Test Record: https://files.catbox.moe/xxxxxx.mp4
+//   - Video Test Record: https://drive.google.com/file/d/xxxxxx/view
 //
 // "#a1b2c3d4" = 8 ký tự đầu của runId — dấu để chống ghi trùng: ô đã chứa dấu này
 // nghĩa là lần chạy đó đã được ghi, thử ghi lại bao nhiêu lần cũng không nhân đôi.

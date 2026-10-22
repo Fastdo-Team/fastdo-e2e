@@ -11,7 +11,7 @@ Bộ công cụ QA Automation tối ưu tốc độ cao cho các testcase Fastdo
 > ```bash
 > npm run plan -- EVAL_024                      # chuẩn bị + biết nên ghi vòng mấy
 > npm test -- EVAL_024 --no-record --no-sheet   # chạy nháp, an toàn
-> npm test -- EVAL_024 --round=3                # chạy thật: video + Catbox + Sheet
+> npm test -- EVAL_024 --round=3                # chạy thật: video + Google Drive + Sheet
 > ```
 >
 > Hoặc không gõ lệnh nào: `npm run ui` mở bảng điều khiển cho QC.
@@ -26,7 +26,7 @@ Bộ công cụ QA Automation tối ưu tốc độ cao cho các testcase Fastdo
 4. **Tự động hóa từ A đến Z:**
    - Tự động dùng lại Session đăng nhập (không phải gõ email/mật khẩu hay chọn tổ chức lại).
    - Tự động quay video màn hình chuẩn MP4 30fps.
-   - Tự động upload lên Catbox lấy link vĩnh viễn.
+   - Tự động upload lên Google Drive (quyền «ai có link đều xem được») lấy link xem.
    - Tự động tìm đúng dòng testcase và cột vòng test (Lần 1, Lần 2...) để điền kết quả vào Google Sheet an toàn.
 
 ---
@@ -49,7 +49,7 @@ Bộ công cụ QA Automation tối ưu tốc độ cao cho các testcase Fastdo
    | Biến | Là gì |
    |---|---|
    | `FASTDO_EMAIL` / `FASTDO_PASSWORD` | tài khoản đăng nhập app |
-   | `CATBOX_USERHASH` | để upload video lấy link vĩnh viễn |
+   | `DRIVE_CLIENT_ID` / `DRIVE_CLIENT_SECRET` / `DRIVE_REFRESH_TOKEN` / `DRIVE_FOLDER_ID` | Google Drive lưu video — `npm run drive:auth` ghi sẵn cả 4 (cách chuẩn bị ở đầu `src/tools/drive-auth.js`) |
    | `TARGET_URL` | dev tunnel hiện hành — **hay hết hạn nhất**, đổi thường xuyên |
    | `SHEET_ID` | id Google Sheet (đoạn giữa `/d/` và `/edit` trong link) |
    | `SHEET_TAB` | tên tab trong Sheet, ví dụ `fEvaluation - VIBE` |
@@ -113,7 +113,7 @@ Kết thúc bằng lệnh chạy đã ghép sẵn, chép lại là được:
   Chạy nháp (không video, không ghi Sheet — cứ chạy, an toàn):
       npm test -- EVAL_021 EVAL_022 --no-record --no-sheet
 
-  Chạy thật (quay video + upload Catbox + GHI SHEET):
+  Chạy thật (quay video + upload Google Drive + GHI SHEET):
       npm test -- EVAL_021 EVAL_022 --round=3
 
 PLAN_RESULT ready=EVAL_021:3,EVAL_022:3 missing=- blocked=-
@@ -168,7 +168,7 @@ Mỗi slot tách riêng 4 thứ nên không dẫm lên nhau:
 | Profile Chrome | `.chrome_profile` | `.chrome_profile_2` |
 | Thư mục video | `videos/` | `videos/acc2/` |
 
-Dùng chung: tunnel, Google Sheet, Catbox.
+Dùng chung: tunnel, Google Sheet, Google Drive.
 
 Hai lưu ý:
 
@@ -341,7 +341,7 @@ sau sẽ nối vào Chrome của lần trước và phá tab của nó.
 
 - Chỉ nghe `127.0.0.1`, mọi thao tác ghi cần token sinh lúc khởi động. Không dùng
   chung qua mạng.
-- **Mật khẩu và `CATBOX_USERHASH` không đọc, không sửa được** qua trình duyệt — chỉ
+- **Mật khẩu và `DRIVE_*` không đọc, không sửa được** qua trình duyệt — chỉ
   hiện đã cấu hình hay chưa. Sửa chúng trong `.env`.
 - `TARGET_URL` phải là `https` và thuộc danh sách tên miền cho phép
   (`.devtunnels.ms`, `.fastdo.vn`, mở rộng bằng `TARGET_URL_ALLOW` trong `.env`).
@@ -358,7 +358,7 @@ npm test -- EVAL_021 --round=3 --sheet-on=pass
 `--sheet-on` nhận `always` (mặc định, như xưa nay) · `pass` · `never`.
 
 Với `pass`, case **ĐẠT** ghi thẳng vào Sheet, còn case **KHÔNG ĐẠT** dừng ở trạng
-thái `pending`: vẫn quay video, vẫn upload Catbox, vẫn có `result.json` — chỉ chưa
+thái `pending`: vẫn quay video, vẫn upload Google Drive, vẫn có `result.json` — chỉ chưa
 đụng Sheet. Lý do: `Fail` trong Sheet có thể là bug app, mà cũng có thể chỉ là kịch
 bản sai selector. Hai thứ đó không được lẫn, và người phân biệt được là QC sau khi
 xem video.

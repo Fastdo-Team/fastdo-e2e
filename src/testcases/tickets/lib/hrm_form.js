@@ -32,6 +32,7 @@ async function getMyName(page) {
 /**
  * Tạo 1 đơn OT 60 phút ngày nghỉ (người duyệt = chính tài khoản), lý do = tag; tự dời khung giờ khi bị báo trùng. Trả { start, end } 'HH:mm'.
  * Lỗi (không đọc được tên, mọi khung giờ bị từ chối) → throw.
+ * @deprecated Tạo dữ liệu qua giao diện (chậm, đơn cũ chồng giờ) — từ agent 1.8.0 dữ liệu thử ghi thẳng Mongo QC: dùng seedOtForm(db, …).
  */
 async function createOT(page, url, tag) {
   await gotoForm(page, url);

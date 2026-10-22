@@ -45,7 +45,7 @@ const PORT = parseInt(process.env.UI_PORT, 10) || 7788;
 // Biến được phép hiện GIÁ TRỊ ra trình duyệt. Mọi biến khác chỉ trả có/không.
 const READABLE_ENV = ['TARGET_URL', 'SHEET_ID', 'SHEET_TAB', 'SHEET_GID', 'ORG_NAME', 'RECORD_FPS', 'CDP_PORT',
   'ENV_LABELS', 'QC_NAME', 'CLAUDE_AUTO_RUN', 'CLAUDE_MODEL', 'CLAUDE_SLOTS', 'CLAUDE_AUTO_SWITCH'];
-// Biến được phép SỬA từ trình duyệt. Mật khẩu, CATBOX_USERHASH, GOOGLE_SA_KEY_FILE cố ý không có ở đây.
+// Biến được phép SỬA từ trình duyệt. Mật khẩu, DRIVE_* (token Google Drive), GOOGLE_SA_KEY_FILE cố ý không có ở đây.
 // CLAUDE_AUTO_RUN vẫn KHÔNG sửa được từ trang: nó mới là công tắc cho phép một nút
 // web khởi động agent. CLAUDE_SLOTS/CLAUDE_AUTO_SWITCH chỉ chọn trong số tài khoản
 // mà người dùng đã tự đăng nhập, không cấp thêm quyền gì.
@@ -677,7 +677,8 @@ function buildState() {
     if (!READABLE_ENV.includes(k)) secrets[k] = Boolean(env[k]);
   }
 
-  const required = ['FASTDO_EMAIL', 'FASTDO_PASSWORD', 'CATBOX_USERHASH', 'TARGET_URL', 'SHEET_ID', 'GOOGLE_SA_KEY_FILE'];
+  const required = ['FASTDO_EMAIL', 'FASTDO_PASSWORD', 'DRIVE_CLIENT_ID', 'DRIVE_CLIENT_SECRET', 'DRIVE_REFRESH_TOKEN', 'TARGET_URL', 'SHEET_ID',
+    'GOOGLE_SA_KEY_FILE'];
   const missing = required.filter((k) => !env[k]);
   if (!env.SHEET_GID && !env.SHEET_TAB) missing.push('SHEET_GID');
   return {

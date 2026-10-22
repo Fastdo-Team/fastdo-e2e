@@ -12,6 +12,8 @@ const fs = require('fs');
 const path = require('path');
 
 const READY_FALSE_RE = /(^|[{,\s])(ready\s*:\s*)false\b/;
+/** Cụm blocker khi case bị chặn vì môi trường thử — PHẢI trùng QcRules.EnvBlockerPhrase của agent (prompt tái hiện bắt ghi đúng cụm này) */
+const ENV_BLOCKER = 'Môi trường thử không chạy';
 const EXPORTS_RE = /module\.exports\s*=\s*\{/;
 
 /**
@@ -78,8 +80,8 @@ function markReady(source) {
 
 /**
  * Hết phiên tái hiện: case chưa sẵn sàng (ready khác true hoặc sai khai báo) mà có bản hợp lệ trong phiên → chép bản đó đè lên
- * kịch bản hiện tại + ready: true.
- * @param {{id: string, ready: boolean, problems: string[]}[]} scripts  listTicketScripts của ticket
+ * kịch bản hiện tại + ready: true. Case AI ghi blocker «Môi trường thử không chạy …» thì giữ nguyên.
+ * @param {{id: string, ready: boolean, blocker?: string, problems: string[]}[]} scripts  listTicketScripts của ticket
  * @param {string} ledger  file sổ chạy nháp của phiên
  * @param {string} ticketsDir  thư mục src/testcases/tickets
  * @returns {{id: string, run: number|null, verdict: string}[]} các case đã khôi phục
@@ -90,6 +92,10 @@ function restoreValidSnapshots(scripts, ledger, ticketsDir) {
   const restored = [];
   for (const script of scripts || []) {
     if (script.ready && !(script.problems || []).length) continue;
+    // AI ghi blocker «Môi trường thử không chạy …» = CỐ Ý không dùng kết quả nháp (Không đạt vì môi trường thiếu job / dịch vụ, không phải
+    // lỗi ticket): không đè bằng bản hợp lệ trước đó — đè thì agent chạy chính thức, Không đạt bị tính «đã tái hiện» và phiên code đi sửa thứ
+    // không phải lỗi. Blocker khác (vd hết lượt sau khi làm hỏng bản hợp lệ — ticket 1308) vẫn khôi phục như cũ.
+    if (String(script.blocker || '').includes(ENV_BLOCKER)) continue;
     const entry = index[script.id];
     const snapshot = entry && path.join(dir, entry.file || `${script.id.toLowerCase()}.test.js`);
     if (!snapshot || !fs.existsSync(snapshot)) continue;

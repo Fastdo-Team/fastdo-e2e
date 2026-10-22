@@ -45,7 +45,7 @@ if (!fs.existsSync(path.join(ROOT_DIR, '.env'))) {
   console.error('✗ Chưa có file .env ở gốc repo.');
   console.error('  Tạo từ mẫu rồi điền giá trị thật:');
   console.error('      cp .env.example .env');
-  console.error('  Bắt buộc: FASTDO_EMAIL, FASTDO_PASSWORD, CATBOX_USERHASH, TARGET_URL, SHEET_ID');
+  console.error('  Bắt buộc: FASTDO_EMAIL, FASTDO_PASSWORD, DRIVE_CLIENT_ID, DRIVE_CLIENT_SECRET, DRIVE_REFRESH_TOKEN (npm run drive:auth), TARGET_URL, SHEET_ID');
   console.error('');
   process.exit(1);
 }
@@ -422,7 +422,7 @@ async function main() {
       console.log(`  Chạy nháp (không video, không ghi Sheet — cứ chạy, an toàn):`);
       console.log(`      npm test -- ${ids} --no-record --no-sheet`);
       console.log('');
-      console.log(`  Chạy thật (quay video + upload Catbox + GHI SHEET):`);
+      console.log(`  Chạy thật (quay video + upload Google Drive + GHI SHEET):`);
       console.log(`      npm test -- ${ids} --round=${round}`);
 
       if (opts.split > 1 && slotsOk) {

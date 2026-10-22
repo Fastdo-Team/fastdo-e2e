@@ -62,3 +62,31 @@ test('lưu bản hợp lệ rồi khôi phục cho case chưa sẵn sàng; case 
 test('không có AIQC_DRY_LEDGER → không lưu gì (QC chạy tay)', () => {
   assert.deepStrictEqual(V.saveValidSnapshots([ok('KHONG_DAT', [{ ok: false }])], {}, () => __filename, {}), []);
 });
+
+test('restoreValidSnapshots: case ghi blocker «Môi trường thử không chạy …» không bị khôi phục; blocker khác vẫn khôi phục', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fe2-valid-env-'));
+  const tickets = path.join(root, 'tickets');
+  fs.mkdirSync(tickets);
+  const file = (id) => path.join(tickets, `${id.toLowerCase()}.test.js`);
+  const env = { AIQC_DRY_LEDGER: path.join(root, 'runs', 'aiqc', 'dry-1338-x.json') };
+  for (const id of ['1338-AI01', '1338-AI02']) fs.writeFileSync(file(id), `module.exports = { id: '${id}', ready: false };`);
+  V.saveValidSnapshots(
+    [
+      { ...ok('KHONG_DAT', [{ ok: false }]), testcaseId: '1338-AI01' },
+      { ...ok('KHONG_DAT', [{ ok: false }]), testcaseId: '1338-AI02' },
+    ],
+    { '1338-AI01': 2, '1338-AI02': 5 },
+    (id) => file(id),
+    env
+  );
+  const restored = V.restoreValidSnapshots(
+    [
+      { id: '1338-AI01', ready: false, blocker: 'Môi trường thử không chạy job nhắc việc — QC kiểm tay', problems: [] },
+      { id: '1338-AI02', ready: false, blocker: 'Hết lượt chạy nháp', problems: [] },
+    ],
+    env.AIQC_DRY_LEDGER,
+    tickets
+  );
+  assert.deepStrictEqual(restored.map((item) => item.id), ['1338-AI02']);
+  assert.match(fs.readFileSync(file('1338-AI01'), 'utf8'), /ready: false/);
+});

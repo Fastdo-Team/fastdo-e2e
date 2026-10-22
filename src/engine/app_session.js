@@ -44,10 +44,30 @@ function invalidateSession(profile) {
   }
 }
 
+/**
+ * File phiên đọc được (JSON hợp lệ). Hỏng (ghi dở khi tiến trình bị giết giữa chừng) → xoá để đăng nhập lại: Playwright đọc file phiên
+ * lúc mở context nên file hỏng làm MỌI case sau lỗi theo cho tới khi có người xoá tay.
+ */
+function readableSession(storagePath) {
+  try {
+    JSON.parse(fs.readFileSync(storagePath, 'utf8'));
+    return true;
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return false;
+    console.log(`[AUTH] File phiên ${storagePath} hỏng (${err && err.message ? err.message : err}) — xoá, đăng nhập lại`);
+    try {
+      fs.unlinkSync(storagePath);
+    } catch {
+      // không xoá được thì lần đăng nhập đầy đủ ghi đè lên
+    }
+    return false;
+  }
+}
+
 async function establish(browser, profile, force) {
   const storagePath = storagePathOf(profile);
   fs.mkdirSync(config.AUTH_DIR, { recursive: true });
-  let useSaved = !force && fs.existsSync(storagePath);
+  let useSaved = !force && fs.existsSync(storagePath) && readableSession(storagePath);
   let lastError = null;
   if (useSaved && isFreshSession(storagePath)) {
     console.log(`[AUTH] ${profile.name}: dùng phiên đã lưu (vừa kiểm gần đây, không mở app kiểm lại)`);

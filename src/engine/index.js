@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const config = require('../config');
-const { uploadToCatbox } = require('../core/catbox');
+const { uploadToDrive } = require('../core/drive');
 const { openSheet } = require('../sheets');
 const { parseEnvLabels, resolveEnvLabel } = require('../sheets/env_label');
 const { showSpaces } = require('../sheets/a1');
@@ -114,110 +114,131 @@ async function runBatch(opts, { print = console.log, onEvent = () => {}, signal 
     );
   }
 
-  try {
-    for (const caseId of opts.caseIds) {
-      if (signal && signal.aborted) break;
-      const script = loadScript(caseId);
-      const profileName = opts.profile || (script ? script.meta.profile : 'default');
-      if (!script) {
-        records.push(blockedRecord({ caseId, opts, profileName, envLabel, batchId, error: `Chưa có kịch bản cho mã "${caseId}"` }));
-        continue;
+  /** Chạy trọn 1 case (nạp kịch bản → đăng nhập → chạy → hậu kỳ video → upload → Sheet → result.json); trả record của case */
+  async function runOneCase(caseId) {
+    const script = loadScript(caseId);
+    const profileName = opts.profile || (script ? script.meta.profile : 'default');
+    if (!script) {
+      return blockedRecord({ caseId, opts, profileName, envLabel, batchId, error: `Chưa có kịch bản cho mã "${caseId}"` });
+    }
+    if (script.meta.problems.length) {
+      return blockedRecord({
+        caseId,
+        title: script.meta.title,
+        opts,
+        profileName,
+        envLabel,
+        batchId,
+        error: `[HỢP ĐỒNG KỊCH BẢN] ${script.meta.problems.join('; ')}`,
+      });
+    }
+    let profile;
+    let storagePath;
+    try {
+      profile = getProfile(profileName);
+      const browser = await phase('Khởi tạo Chrome (Playwright)', () => pool.get());
+      storagePath = await phase(`Đăng nhập hồ sơ ${profileName}`, () => ensureProfileSession(browser, profile));
+    } catch (err) {
+      return blockedRecord({ caseId, title: script.meta.title, opts, profileName, envLabel, batchId, error: err.message });
+    }
+
+    print('\n' + '-'.repeat(70));
+    print(`[RUNNER] ▶ ${caseId} (${opts.mode === 'nhap' ? 'CHẠY NHÁP' : `Vòng test: LẦN ${opts.round}`}) · hồ sơ ${profile.name}`);
+    print('-'.repeat(70));
+
+    let record = await runOnce(script, profile, storagePath, 1);
+    if (record.errorCode === 'SESSION_EXPIRED' && !(signal && signal.aborted)) {
+      print(`[AUTH] Phiên của hồ sơ ${profile.name} hết hạn giữa lượt — đăng nhập lại rồi chạy lại ${caseId} (lần 2)`);
+      writeRecord(record);
+      try {
+        storagePath = await phase(`Đăng nhập lại hồ sơ ${profile.name}`, async () =>
+          ensureProfileSession(await pool.get(), profile, { force: true })
+        );
+        const first = record;
+        record = await runOnce(script, profile, storagePath, 2);
+        first.retriedAs = record.runDir;
+        writeRecord(first);
+      } catch (err) {
+        record.error = `${record.error} · đăng nhập lại cũng hỏng: ${err.message}`;
       }
-      if (script.meta.problems.length) {
-        records.push(
-          blockedRecord({
+    }
+    const label = { DAT: '✅ PASS', KHONG_DAT: '❌ FAIL', LOI_HA_TANG: '⚠ LỖI HẠ TẦNG', DA_HUY: '⏹ ĐÃ HUỶ' }[record.verdict];
+    print(`[RUNNER] Kết quả test: ${label}${record.error ? ` — ${record.error}` : ''}`);
+
+    if (record.video.webm) {
+      try {
+        const out = await phase(`${caseId} · hậu kỳ video`, () =>
+          renderCaseVideo({
+            runDir: record.runDir,
+            // thường là video.webm; đổi tên lỗi (file còn bị giữ) thì case_runner giữ nguyên tên Playwright đặt
+            webmName: path.basename(record.video.webm),
+            mp4Name: `${caseId}_AutoRecord.mp4`,
             caseId,
-            title: script.meta.title,
-            opts,
-            profileName,
-            envLabel,
-            batchId,
-            error: `[HỢP ĐỒNG KỊCH BẢN] ${script.meta.problems.join('; ')}`,
+            steps: record.steps,
+            actions: record.actions,
+            trimMs: record.trimMs,
+            durationMs: record.durationMs,
+            endMs: record.videoEndMs,
+            closeMs: record.videoCloseMs,
           })
         );
-        continue;
-      }
-      let profile;
-      let storagePath;
-      try {
-        profile = getProfile(profileName);
-        const browser = await phase('Khởi tạo Chrome (Playwright)', () => pool.get());
-        storagePath = await phase(`Đăng nhập hồ sơ ${profileName}`, () => ensureProfileSession(browser, profile));
+        record.video.mp4 = out.mp4;
+        record.video.vtt = out.vtt;
+        record.videoPath = out.mp4;
       } catch (err) {
-        records.push(blockedRecord({ caseId, title: script.meta.title, opts, profileName, envLabel, batchId, error: err.message }));
-        continue;
+        print(`[VIDEO] ⚠ Hậu kỳ hỏng, dùng bản webm gốc: ${err.message}`);
       }
-
-      print('\n' + '-'.repeat(70));
-      print(`[RUNNER] ▶ ${caseId} (${opts.mode === 'nhap' ? 'CHẠY NHÁP' : `Vòng test: LẦN ${opts.round}`}) · hồ sơ ${profile.name}`);
-      print('-'.repeat(70));
-
-      let record = await runOnce(script, profile, storagePath, 1);
-      if (record.errorCode === 'SESSION_EXPIRED' && !(signal && signal.aborted)) {
-        print(`[AUTH] Phiên của hồ sơ ${profile.name} hết hạn giữa lượt — đăng nhập lại rồi chạy lại ${caseId} (lần 2)`);
-        writeRecord(record);
+      if (record.video.mp4) {
+        // mp4 đã có thì webm chỉ là bản thô — xoá lỗi (file còn bị giữ) không phải hậu kỳ hỏng
         try {
-          storagePath = await phase(`Đăng nhập lại hồ sơ ${profile.name}`, async () =>
-            ensureProfileSession(await pool.get(), profile, { force: true })
-          );
-          const first = record;
-          record = await runOnce(script, profile, storagePath, 2);
-          first.retriedAs = record.runDir;
-          writeRecord(first);
-        } catch (err) {
-          record.error = `${record.error} · đăng nhập lại cũng hỏng: ${err.message}`;
-        }
-      }
-      const label = { DAT: '✅ PASS', KHONG_DAT: '❌ FAIL', LOI_HA_TANG: '⚠ LỖI HẠ TẦNG', DA_HUY: '⏹ ĐÃ HUỶ' }[record.verdict];
-      print(`[RUNNER] Kết quả test: ${label}${record.error ? ` — ${record.error}` : ''}`);
-
-      if (record.video.webm) {
-        try {
-          const out = await phase(`${caseId} · hậu kỳ video`, () =>
-            renderCaseVideo({
-              runDir: record.runDir,
-              // thường là video.webm; đổi tên lỗi (file còn bị giữ) thì case_runner giữ nguyên tên Playwright đặt
-              webmName: path.basename(record.video.webm),
-              mp4Name: `${caseId}_AutoRecord.mp4`,
-              caseId,
-              steps: record.steps,
-              actions: record.actions,
-              trimMs: record.trimMs,
-              durationMs: record.durationMs,
-              endMs: record.videoEndMs,
-              closeMs: record.videoCloseMs,
-            })
-          );
-          record.video.mp4 = out.mp4;
-          record.video.vtt = out.vtt;
-          record.videoPath = out.mp4;
           fs.unlinkSync(record.video.webm);
           record.video.webm = null;
         } catch (err) {
-          print(`[VIDEO] ⚠ Hậu kỳ hỏng, dùng bản webm gốc: ${err.message}`);
+          print(`[VIDEO] ⚠ Không xoá được bản webm thô (${err.code || err.message}) — giữ lại, video dùng bản mp4`);
         }
-        onEvent({ ev: 'case.video', caseId, mp4: record.videoPath, url: null });
       }
+      onEvent({ ev: 'case.video', caseId, mp4: record.videoPath, url: null });
+    }
 
-      // Chỉ upload video của kết quả kiểm thử thật (ĐẠT / KHÔNG ĐẠT) — video lỗi hạ tầng
-      // hay bị huỷ không bao giờ lên Sheet, không đưa lên host công khai.
-      const uploadable = record.verdict === 'DAT' || record.verdict === 'KHONG_DAT';
-      if (opts.upload && record.videoPath && uploadable) {
+    // Chỉ upload video của kết quả kiểm thử thật (ĐẠT / KHÔNG ĐẠT) — video lỗi hạ tầng
+    // hay bị huỷ không bao giờ lên Sheet, không đưa lên host công khai.
+    const uploadable = record.verdict === 'DAT' || record.verdict === 'KHONG_DAT';
+    if (opts.upload && record.videoPath && uploadable) {
+      try {
+        record.videoUrl = await phase(`${caseId} · upload Google Drive`, () =>
+          uploadToDrive(record.videoPath, `${caseId}_AutoRecord${path.extname(record.videoPath)}`)
+        );
+        record.video.url = record.videoUrl;
+        onEvent({ ev: 'case.video', caseId, mp4: record.videoPath, url: record.videoUrl });
+      } catch (err) {
+        print(`[ERROR] Upload Google Drive thất bại: ${err.message}`);
+      }
+    }
+
+    record.sheet = await phase(`${caseId} · ghi Google Sheet`, () => writeSheetForRecord(record, { sheet, opts, print }));
+    onEvent({ ev: 'case.sheet', caseId, state: record.sheet.state, cells: record.sheet.cells || null, reason: record.sheet.reason || null });
+    writeRecord(record);
+    return record;
+  }
+
+  try {
+    for (const caseId of opts.caseIds) {
+      if (signal && signal.aborted) break;
+      try {
+        records.push(await runOneCase(caseId));
+      } catch (err) {
+        // Lỗi ngoài dự kiến của 1 case (nạp kịch bản, mở lại Chrome, ghi result.json…) không được làm sập cả lượt: case sau vẫn chạy,
+        // bản kê vẫn được ghi. Trước đây runBatch ném lỗi → runner không ghi bản kê → agent mất kết quả MỌI case của lượt.
+        const message = err && err.message ? err.message : String(err);
+        print(`[RUNNER] ✗ ${caseId}: lỗi khi chạy — ${message}`);
         try {
-          record.videoUrl = await phase(`${caseId} · upload Catbox`, () =>
-            uploadToCatbox(record.videoPath, `${caseId}_AutoRecord${path.extname(record.videoPath)}`)
+          records.push(
+            blockedRecord({ caseId, opts, profileName: opts.profile || 'default', envLabel, batchId, error: `Lỗi khi chạy: ${message}` })
           );
-          record.video.url = record.videoUrl;
-          onEvent({ ev: 'case.video', caseId, mp4: record.videoPath, url: record.videoUrl });
-        } catch (err) {
-          print(`[ERROR] Upload Catbox thất bại: ${err.message}`);
+        } catch (writeErr) {
+          print(`[RUNNER] ✗ ${caseId}: không ghi được kết quả — ${writeErr && writeErr.message ? writeErr.message : writeErr}`);
         }
       }
-
-      record.sheet = await phase(`${caseId} · ghi Google Sheet`, () => writeSheetForRecord(record, { sheet, opts, print }));
-      onEvent({ ev: 'case.sheet', caseId, state: record.sheet.state, cells: record.sheet.cells || null, reason: record.sheet.reason || null });
-      writeRecord(record);
-      records.push(record);
     }
   } finally {
     await pool.close();

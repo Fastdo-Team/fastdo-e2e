@@ -47,3 +47,16 @@ test('check() ghi nhận phép kiểm, trả boolean, không ném lỗi', () => 
   assert.deepStrictEqual(log.checks, [{ label: 'Banner chỉ xem', ok: false, expected: 'có', actual: 'không' }]);
   assert.strictEqual(log.failedChecks().length, 1);
 });
+
+test('check(): expected / actual BigInt hay vòng tham chiếu vẫn ghi được ra JSON (trước đây làm sập cả lượt chạy)', () => {
+  const log = createStepLog({ print: () => {} });
+  const loop = { name: 'locator' };
+  loop.self = loop;
+  log.check('Giờ bắt đầu', false, { expected: 638950000000000000n, actual: { start: 1n, label: 'x' } });
+  log.check('Ô nhập', true, { expected: loop, actual: undefined });
+  const json = JSON.parse(JSON.stringify(log.checks));
+  assert.strictEqual(json[0].expected, '638950000000000000n');
+  assert.deepStrictEqual(json[0].actual, { start: '1n', label: 'x' });
+  assert.strictEqual(json[1].expected, '[object Object]');
+  assert.strictEqual('actual' in json[1], false);
+});

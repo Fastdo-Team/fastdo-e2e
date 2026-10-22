@@ -9,15 +9,20 @@
 // Cờ: --grep=<regex> --tables --text --all --limit=<n> --setup=<file>
 //     --out=<tên file> --keep-open --wait=<ms> --wait-text=<chuỗi>
 //
-// Dùng lại y nguyên session đăng nhập trong .auth/user_state.json nên chạy mất
-// ~3-4 giây, không phải gõ lại email/mật khẩu.
+// Dùng CHUNG phiên đăng nhập với engine v2 (Playwright, .auth/<hồ sơ>.json, cùng hồ sơ mà `npm run e2e:dry` dùng theo
+// FASTDO_ACCOUNT): phiên còn hạn thì vào thẳng, hết hạn thì tự đăng nhập lại, chọn đúng tổ chức. Bản cũ dùng engine v1
+// (Puppeteer, .auth/user_state.json) báo «Session còn hiệu lực» rồi trả về màn đăng nhập — 6/9 lần gọi trong phiên tái hiện
+// AI-QC 14–16/10, AI phải dùng lượt chạy nháp để dò giao diện thay cho probe.
+// Chrome chạy ẩn (thêm --headed để xem); --keep-open không còn tác dụng (Chrome do Playwright mở luôn đóng theo lệnh).
 // ============================================================================
 
 const fs = require('fs');
 const path = require('path');
 const config = require('../config');
-const { initBrowser } = require('../core/browser');
-const { ensureAuthenticated } = require('../core/session');
+const { createBrowserPool } = require('../engine/browser_pool');
+const { getProfile, profileForAccount } = require('../engine/profiles');
+const { ensureProfileSession, warmUp, VIEWPORT } = require('../engine/app_session');
+const { guardPage } = require('../engine/page_guard');
 const { humanClick, humanType, waitXPath, clickUntil } = require('../core/cursor_motion');
 const { setFlatpickrField } = require('../core/datetime_picker');
 const { digestToFile } = require('../core/dom_digest');
@@ -35,6 +40,7 @@ function parseArgs() {
     setup: null,
     out: null,
     keepOpen: false,
+    headed: false,
     wait: 15000,
     waitText: null,
   };
@@ -44,6 +50,7 @@ function parseArgs() {
     else if (arg === '--text') opts.text = true;
     else if (arg === '--all') opts.all = true;
     else if (arg === '--keep-open') opts.keepOpen = true;
+    else if (arg === '--headed') opts.headed = true;
     else if (arg.startsWith('--grep=')) opts.grep = arg.slice('--grep='.length);
     else if (arg.startsWith('--limit=')) opts.limit = parseInt(arg.split('=')[1], 10) || 120;
     else if (arg.startsWith('--wait=')) opts.wait = parseInt(arg.split('=')[1], 10) || 15000;
@@ -105,23 +112,42 @@ async function main() {
   console.log('='.repeat(70));
   console.log(`[PROBE] URL: ${url}`);
 
-  let browserInstance = null;
+  if (opts.keepOpen) console.log('[PROBE] Bỏ qua --keep-open: probe dùng Chrome của Playwright, luôn đóng khi xong');
+
+  const pool = createBrowserPool({ headless: !opts.headed });
+  let context = null;
+
+  /** Context đã có phiên đăng nhập của hồ sơ, vào thẳng trang cần dò (đúng tổ chức). Phiên hết hạn → đăng nhập lại 1 lần. */
+  async function openTarget(browser, profile) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const storageState = await ensureProfileSession(browser, profile, { force: attempt > 1 });
+      context = await browser.newContext({ viewport: VIEWPORT, storageState });
+      const page = guardPage(await context.newPage());
+      page.__fastdoOrg = profile.org;
+      try {
+        await warmUp(page, profile, url);
+        return page;
+      } catch (err) {
+        await context.close().catch(() => {});
+        context = null;
+        if (err.code !== 'SESSION_EXPIRED' || attempt > 1) {
+          console.error(
+            `[PROBE] Không vào được ${url}: ${err.message}\n` +
+              '        Kiểm tra TARGET_URL trong .env (bản test đã bật chưa / dev tunnel còn hạn) và tài khoản của hồ sơ.'
+          );
+          throw err;
+        }
+        console.log(`[PROBE] Phiên của hồ sơ ${profile.name} hết hạn — đăng nhập lại`);
+      }
+    }
+    throw new Error('không vào được trang');
+  }
 
   async function run() {
-    browserInstance = await initBrowser();
-    const { browser, page } = browserInstance;
-
-    await ensureAuthenticated(page);
-
-    try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    } catch (err) {
-      console.error(
-        `[PROBE] Không mở được ${url}: ${err.message}\n` +
-          '        Kiểm tra TARGET_URL trong .env - dev tunnel có thể đã hết hạn hoặc đổi URL.'
-      );
-      throw err;
-    }
+    const browser = await pool.get();
+    const profile = getProfile(config.ACCOUNT > 1 ? profileForAccount(config.ACCOUNT) : 'default');
+    const page = await openTarget(browser, profile);
+    console.log(`[PROBE] Hồ sơ ${profile.name} · đang ở ${page.url()}`);
 
     const settle = await waitForSettle(page, opts.wait, opts.waitText, url);
     console.log(
@@ -196,42 +222,17 @@ async function main() {
     process.exitCode = 1;
     timedOut = /probe treo quá/.test(error.message);
   } finally {
-    if (browserInstance && !timedOut) {
-      // CDP còn phản hồi bình thường (không phải nhánh watchdog) — dọn như cũ.
-      // --keep-open chỉ giữ được Chrome mà probe NỐI vào (đã mở sẵn ở cổng debug). Chrome do chính probe khởi chạy là
-      // tiến trình con của node: chỉ ngắt kết nối thì node không bao giờ thoát và lệnh treo mãi (gặp khi agent AI-QC
-      // gọi probe, 2026-10-14) — trường hợp đó đóng Chrome như khi không có cờ.
-      if (opts.keepOpen && !browserInstance.isConnected) {
-        console.log('[PROBE] Bỏ qua --keep-open: Chrome do probe tự mở (chưa có Chrome ở cổng debug) — đóng như thường');
-      }
-      if (opts.keepOpen && browserInstance.isConnected) {
-        // Đóng tab probe nhưng giữ Chrome sống: lần probe sau sẽ NỐI vào port
-        // 9222 (~0.5s) thay vì khởi chạy lại (~3s). Tab vẫn phải đóng, không thì
-        // tab tích luỹ dần đúng như hồi phải viết close_stale_tabs.js.
-        try {
-          if (!browserInstance.page.isClosed()) await browserInstance.page.close();
-        } catch (e) {}
-        try {
-          browserInstance.browser.disconnect();
-        } catch (e) {}
-        console.log('[PROBE] Giữ Chrome sống cho lần probe kế tiếp (--keep-open)');
-      } else {
-        await browserInstance.close();
-      }
-    } else if (browserInstance && timedOut) {
-      // Watchdog bắn nghĩa là CDP CHÍNH LÀ nghi phạm — page.close()/browser.close()
-      // dùng lại đúng kênh đó nên có thể treo tiếp, kéo theo tiến trình không bao
-      // giờ tự thoát được (đúng lỗi ban đầu, chỉ dời sang chỗ khác). Cho chính
-      // bước dọn 5 giây, không hơn; treo thì bỏ, để `npm run chrome:kill` xử lý
-      // Chrome còn sót lại sau đó.
-      await Promise.race([
-        browserInstance.close().catch(() => {}),
-        new Promise((r) => setTimeout(r, 5000)),
-      ]);
+    // Watchdog bắn thì kênh tới Chrome chính là nghi phạm — bước dọn có thể treo tiếp: cho tối đa 5 giây rồi thoát hẳn
+    // (JS không huỷ được 1 await đang chờ — đừng để tiến trình giữ terminal mãi vì một promise mồ côi).
+    const cleanup = (async () => {
+      if (context) await context.close().catch(() => {});
+      await pool.close();
+    })();
+    if (timedOut) {
+      await Promise.race([cleanup, new Promise((r) => setTimeout(r, 5000))]);
+      process.exit(process.exitCode);
     }
-    // watchdog bắn thì run() có thể còn treo đâu đó (JS không huỷ được 1 await
-    // đang chờ) — đừng để tiến trình giữ terminal mãi vì một promise mồ côi.
-    if (timedOut) process.exit(process.exitCode);
+    await cleanup;
   }
 }
 

@@ -13,7 +13,7 @@ Tra cứu khi cần hiểu bộ máy bên dưới. Đường chạy thường ng
 | `core/browser.js` | Nối vào Chrome ở cổng CDP của slot, không có thì tự khởi chạy Chrome thật với profile riêng của slot |
 | `core/cursor_motion.js` | Con trỏ ảo đỏ + hiệu ứng sóng khi click, cho video |
 | `core/recorder.js` | Quay MP4, mặc định 15fps (đổi bằng `RECORD_FPS` trong `.env`) |
-| `core/catbox.js` | Upload Catbox lấy link vĩnh viễn (có `userhash` + retry) |
+| `core/drive.js` | Upload Google Drive lấy link xem (OAuth Gmail `DRIVE_*`, resumable, kiểm lại kích thước + retry) — thay `core/catbox.js` (Catbox chết 2026-10-22) |
 | `core/sheet_service.js` | Tìm dòng theo mã, tính cột `TEST LẦN N`, ghi Trạng thái + Kết quả, **verify lại sau khi ghi** |
 | `core/dom_digest.js` | Sinh digest DOM dạng text + cờ độ tin cậy. Nguồn duy nhất cho probe / `ctx.dump` / báo cáo lỗi |
 | `core/diagnostics.js` | Bắt console + request lỗi, nhật ký bước, phân loại lỗi, ghi `diagnostics/*.fail.md` |
@@ -46,7 +46,7 @@ khi runner ghi về cột I của vòng 1.
 | `--round=N` | ghi vào cột `TEST LẦN N` (mặc định 1) |
 | `--no-record` | không quay video (nhanh hơn ~20s) |
 | `--no-sheet` | không ghi Google Sheet |
-| `--no-upload` | quay nhưng không upload Catbox |
+| `--no-upload` | quay nhưng không upload Google Drive |
 | `--row=N` | chỉ định cứng dòng Sheet |
 | `--case-timeout=<giây>` | hạn giờ mỗi case (mặc định 150) |
 | `--auth-only` | chỉ đăng nhập lại, không chạy case nào (= `npm run test:auth`) |
@@ -95,7 +95,7 @@ Slot 1 giữ nguyên mọi tên cũ, nên `.env` và `.auth` sẵn có không ph
 | Thư mục hiện vật | `runs/…-acc1-<pid>/` | `runs/…-acc2-<pid>/` |
 
 Dùng chung mọi slot: `TARGET_URL` (cùng tunnel), `SHEET_ID`/`SHEET_TAB` (cùng
-Sheet), `CATBOX_USERHASH` (cùng nơi lưu video).
+Sheet), `DRIVE_*` (cùng nơi lưu video).
 
 Bốn thứ trên phải tách, thiếu một cái là hai lần chạy dẫm lên nhau:
 
@@ -191,7 +191,7 @@ khi thấy nặng.
 | Phục hồi session | 1.8s |
 | Các bước kiểm thử | ~21s |
 | Kết thúc & lưu video | 1.5s |
-| Upload Catbox | 2.3s |
+| Upload Catbox (đo khi còn Catbox) | 2.3s |
 | Ghi Google Sheet | 5.2s |
 
 Runner in bảng thời gian từng chặng ở cuối mỗi lần chạy — nhìn đó để biết chậm ở

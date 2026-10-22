@@ -140,3 +140,26 @@ test('mã băm đổi khi hàm dùng chung trong tickets/lib đổi', () => {
   fs.writeFileSync(path.join(lib, 'hrm_form.js'), 'v2');
   assert.notStrictEqual(h1, M.scriptHash(f, root, []));
 });
+
+test('listHelpers: hàm @deprecated (vd tạo dữ liệu qua giao diện) không được liệt kê cho phiên tái hiện', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fe2-helpers-dep-'));
+  const lib = path.join(dir, 'tickets', 'lib');
+  fs.mkdirSync(lib, { recursive: true });
+  fs.writeFileSync(
+    path.join(lib, 'hrm_form.js'),
+    [
+      '/**',
+      ' * Tạo đơn qua giao diện.',
+      ' * @deprecated dùng seedOtForm',
+      ' */',
+      'async function createOT(page) {}',
+      '/** Ghi đơn OT thẳng Mongo QC. */',
+      'async function seedOtForm(db, opts) {}',
+      'module.exports = { createOT, seedOtForm };',
+    ].join('\n')
+  );
+  assert.deepStrictEqual(
+    M.listHelpers(dir).map((item) => item.name),
+    ['seedOtForm(db, opts)']
+  );
+});

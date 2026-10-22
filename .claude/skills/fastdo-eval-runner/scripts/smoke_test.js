@@ -1,11 +1,11 @@
 // ============================================================================
-// smoke_test.js: Thử đường ống quay video + upload Catbox, KHÔNG đụng tới app.
+// smoke_test.js: Thử đường ống quay video + upload Google Drive, KHÔNG đụng tới app.
 //
 //   npm run smoke-test
 //
-// Dùng khi runner báo "Lưu video thất bại" hoặc "Upload Catbox thất bại" và cần
+// Dùng khi runner báo "Lưu video thất bại" hoặc "Upload Google Drive thất bại" và cần
 // biết lỗi nằm ở app hay ở đường ống ghi hình: smoke test chỉ mở example.com,
-// quay 1.5 giây rồi upload. Chạy OK nghĩa là ffmpeg + CATBOX_USERHASH đều sống,
+// quay 1.5 giây rồi upload. Chạy OK nghĩa là ffmpeg + token Drive (DRIVE_*) đều sống,
 // lỗi nằm ở phía testcase.
 //
 // Dùng chung module với runner (src/core/*) nên không có bản sao cấu hình riêng
@@ -19,7 +19,7 @@ const { PuppeteerScreenRecorder } = require('puppeteer-screen-recorder');
 
 const ROOT_DIR = path.join(__dirname, '..', '..', '..', '..');
 const config = require(path.join(ROOT_DIR, 'src', 'config'));
-const { uploadToCatbox } = require(path.join(ROOT_DIR, 'src', 'core', 'catbox'));
+const { uploadToDrive } = require(path.join(ROOT_DIR, 'src', 'core', 'drive'));
 const { CURSOR_CSS_AND_JS } = require(path.join(ROOT_DIR, 'src', 'core', 'cursor_motion'));
 
 async function main() {
@@ -44,7 +44,7 @@ async function main() {
   console.log('STEP: kích thước file video:', stats.size, 'bytes');
   if (stats.size < 1000) throw new Error('File video quá nhỏ, có thể quay lỗi');
 
-  const url = await uploadToCatbox(videoPath, 'smoke_test.mp4');
+  const url = await uploadToDrive(videoPath, 'smoke_test.mp4');
   console.log('SMOKE_TEST_RESULT: OK, video url =', url);
 
   fs.unlinkSync(videoPath);

@@ -10,6 +10,7 @@
     "test:auth": "node src/runner.js --auth-only",
     "e2e:dry": "node src/runner.js --nhap --headless",
     "aiqc": "node src/tools/aiqc.js",
+    "drive:auth": "node src/tools/drive-auth.js",
     "test:unit": "node --test src/core/*.test.js src/sheets/*.test.js src/engine/*.test.js src/tools/*.test.js",
     "test:engine": "node --test --test-concurrency=1 src/engine/integration/*.test.js",
     "probe": "node src/tools/probe.js",

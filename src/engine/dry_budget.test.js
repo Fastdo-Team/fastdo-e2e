@@ -29,3 +29,15 @@ test('sổ hỏng → đếm lại từ 0 (không chặn nhầm)', () => {
   fs.writeFileSync(env.AIQC_DRY_LEDGER, '{hỏng');
   assert.deepStrictEqual(takeDryBudget(['1309-AI01'], env).allowed, ['1309-AI01']);
 });
+
+test('refundDryBudget: trả lại lượt cho case chưa kịp chạy kịch bản; không xuống dưới 0; không có sổ thì bỏ qua', () => {
+  const { refundDryBudget } = require('./dry_budget');
+  const env = { AIQC_DRY_BUDGET: '2', AIQC_DRY_LEDGER: ledgerIn() };
+  takeDryBudget(['1309-AI01', '1309-AI02'], env);
+  takeDryBudget(['1309-AI01'], env);
+  refundDryBudget(['1309-AI01', '1309-AI03'], env);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(env.AIQC_DRY_LEDGER, 'utf8')), { '1309-AI01': 1, '1309-AI02': 1 });
+  // lượt đã trả lại dùng được tiếp
+  assert.deepStrictEqual(takeDryBudget(['1309-AI01'], env).allowed, ['1309-AI01']);
+  refundDryBudget(['1309-AI01'], {});
+});

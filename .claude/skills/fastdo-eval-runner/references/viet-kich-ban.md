@@ -95,7 +95,7 @@ Dùng được gì:
 Ranh giới cần giữ:
 
 - MCP chỉ dùng cho **khám phá và chẩn đoán**. Lần chạy chính thức vẫn phải là
-  `npm test` — video, con trỏ đỏ, upload Catbox và ghi Sheet nằm hết trong repo,
+  `npm test` — video, con trỏ đỏ, upload Google Drive và ghi Sheet nằm hết trong repo,
   MCP không sinh ra được.
 - Thao tác qua MCP **không** tạo con trỏ đỏ trong video, nên đừng dùng nó để quay.
 - `take_screenshot` của MCP vẫn là ảnh và vẫn tốn 8–20k token. Ưu tiên

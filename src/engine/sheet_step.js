@@ -35,7 +35,7 @@ async function writeSheetForRecord(record, { sheet, opts, print = console.log })
     return {
       state: 'waiting-upload',
       target,
-      reason: record.videoPath ? 'upload Catbox thất bại nên chưa có link video — chưa ghi' : 'không có video — chưa ghi',
+      reason: record.videoPath ? 'upload Google Drive thất bại nên chưa có link video — chưa ghi' : 'không có video — chưa ghi',
     };
   }
 

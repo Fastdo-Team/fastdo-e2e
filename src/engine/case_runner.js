@@ -237,6 +237,8 @@ async function runCase({
       return { page: otherPage, profile: { name: other.name, org: other.org }, close: () => extra.close().catch(() => {}) };
     };
     const ctx = createCtx({ page, context, browser, profile, signal, stepLog, runDir, caseId, log: print, cleanups, openAs, db: qcDb.api });
+    // Mốc «kịch bản đã chạy»: lỗi trước mốc này (Chrome, đăng nhập, vào app) là hạ tầng — runner trả lại lượt chạy nháp (dry_budget)
+    record.scriptStarted = true;
     const result = await guardRun(Promise.resolve().then(() => script.module.run(ctx)), { timeoutMs, signal });
     checkContract(result, stepLog);
     record.pass = result.pass;

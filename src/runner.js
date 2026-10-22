@@ -3,7 +3,7 @@
 // runner.js: CLI chạy test — lớp mỏng gọi engine v2 (src/engine/, Playwright).
 //
 //   npm test -- EVAL_021 --nhap                 chạy nháp: không upload, không ghi Sheet
-//   npm test -- EVAL_021 EVAL_022 --round=3      chạy thật: video + Catbox + Sheet
+//   npm test -- EVAL_021 EVAL_022 --round=3      chạy thật: video + Google Drive + Sheet
 //   Cờ khác: --video --headless --profile=<tên> --account=N --no-sheet --row=N
 //            --case-timeout=<giây> --report-json=runs/<tên>.json --sheet-on=pass|never
 //            --auth-only (đăng nhập lại hồ sơ)
@@ -44,7 +44,7 @@ const KNOWN_FLAGS = [
 // Mã case đi thẳng vào path.join() rồi require(), nên chuỗi tự do ở đây là thực thi mã
 // tuỳ ý. Chỉ nhận đúng dạng mã (engine/case_id.js): EVAL_… hoặc case theo ticket 1295-QC01.
 const { isCaseId } = require('./engine/case_id');
-const { takeDryBudget } = require('./engine/dry_budget');
+const { takeDryBudget, refundDryBudget } = require('./engine/dry_budget');
 const { saveValidSnapshots } = require('./engine/valid_snapshot');
 
 class ArgError extends Error {}
@@ -231,6 +231,16 @@ async function main() {
     process.exitCode = 1;
     return;
   }
+  // Thiếu biến bắt buộc thì dừng NGAY, đừng để lỗi nổ sau khi đã quay xong video — kiểm TRƯỚC khi trừ lượt chạy nháp (lỗi cấu hình
+  // không được ăn vào trần của AI).
+  try {
+    config.assertReady();
+  } catch (err) {
+    console.error(`[ERROR] ${err.message}`);
+    process.exitCode = 1;
+    return;
+  }
+
   // Phiên tái hiện AI-QC: trần số lần chạy nháp mỗi case (dry_budget) — hết lượt thì từ chối case đó
   let quota = null;
   if (o.mode === 'nhap') {
@@ -250,15 +260,6 @@ async function main() {
       }
     }
   }
-  // Thiếu biến bắt buộc thì dừng NGAY, đừng để lỗi nổ sau khi đã quay xong video.
-  try {
-    config.assertReady();
-  } catch (err) {
-    console.error(`[ERROR] ${err.message}`);
-    process.exitCode = 1;
-    return;
-  }
-
   console.log(
     `[RUNNER] ${o.mode === 'nhap' ? 'CHẠY NHÁP (không upload, không ghi Sheet)' : `CHẠY THẬT · vòng ${o.round}`} · ` +
       `${o.caseIds.length} case: ${o.caseIds.join(', ')}`
@@ -284,6 +285,18 @@ async function main() {
     process.removeListener('SIGINT', onSigint);
   }
   printSummary(out.records, out.seconds, out.timings);
+
+  // Case kịch bản chưa kịp chạy (Chrome / đăng nhập / vào app lỗi, sai khai báo) → trả lại lượt chạy nháp
+  if (quota && quota.budget) {
+    const unstarted = out.records
+      .filter((r) => !r.scriptStarted && !r.cancelled)
+      .map((r) => String(r.testcaseId || '').toUpperCase())
+      .filter(Boolean);
+    if (unstarted.length) {
+      refundDryBudget(unstarted);
+      console.log(`[AIQC] Không tính lượt chạy nháp cho ${unstarted.join(', ')} — kịch bản chưa kịp chạy (lỗi khởi động / đăng nhập / khai báo).`);
+    }
+  }
 
   // Phiên tái hiện AI-QC: giữ bản kịch bản của lần chạy nháp hợp lệ (valid_snapshot) — hết phiên mà AI chưa đánh dấu ready thì
   // agent dùng lại bản này (ticket 1308: lượt 7 hợp lệ, AI sửa tiếp làm hỏng rồi hết lượt)
@@ -342,6 +355,11 @@ async function main() {
 }
 
 if (require.main === module) {
+  // Kịch bản hay bỏ rơi promise (vd `const nav = page.waitForURL(…)` rồi bước sau lỗi → `nav` bị từ chối không ai chờ): Node mặc định thoát
+  // ngay giữa case kế tiếp → mất bản kê của cả lượt. Chỉ cảnh báo; case đang chạy vẫn kết thúc theo kết quả của chính nó.
+  process.on('unhandledRejection', (reason) => {
+    console.error(`[WARN] Promise bị từ chối mà không ai xử lý (bỏ qua): ${reason && reason.message ? reason.message : reason}`);
+  });
   main().catch((err) => {
     console.error(`[FATAL ERROR] ${err && err.message ? err.message : err}`);
     process.exitCode = 1;

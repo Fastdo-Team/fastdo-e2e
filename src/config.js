@@ -23,7 +23,7 @@ const ROOT_DIR = path.join(__dirname, '..');
 //                            trên cùng một user-data-dir)
 //
 // Những thứ DÙNG CHUNG vì bản chất là một: TARGET_URL (cùng tunnel), SHEET_ID
-// (cùng Sheet), CATBOX_USERHASH (cùng nơi lưu video).
+// (cùng Sheet), DRIVE_* (cùng nơi lưu video).
 // ---------------------------------------------------------------------------
 function resolveAccountSlot() {
   const fromArgv = process.argv.find((a) => a.startsWith('--account='));
@@ -45,7 +45,14 @@ function slotEnv(name, { fallback = false } = {}) {
 
 const EMAIL = slotEnv('FASTDO_EMAIL');
 const PASSWORD = slotEnv('FASTDO_PASSWORD');
+// Catbox chết server 2026-10-22 — video nay lên Google Drive (core/drive.js). Biến cũ chỉ còn cho core/catbox.js.
 const CATBOX_USERHASH = process.env.CATBOX_USERHASH;
+// Google Drive lưu video: OAuth client Desktop + refresh token của 1 tài khoản Gmail (npm run drive:auth ghi sẵn cả 4 biến).
+// Thư mục trống = gốc My Drive.
+const DRIVE_CLIENT_ID = (process.env.DRIVE_CLIENT_ID || '').trim();
+const DRIVE_CLIENT_SECRET = (process.env.DRIVE_CLIENT_SECRET || '').trim();
+const DRIVE_REFRESH_TOKEN = (process.env.DRIVE_REFRESH_TOKEN || '').trim();
+const DRIVE_FOLDER_ID = (process.env.DRIVE_FOLDER_ID || '').trim();
 
 // Ba biến dưới đây quyết định GHI VÀO ĐÂU, nên tuyệt đối không có giá trị mặc
 // định. Bản cũ để sẵn URL tunnel và SHEET_ID thật trong code: .env mất SHEET_ID
@@ -67,7 +74,9 @@ const GOOGLE_SA_KEY_FILE = (process.env.GOOGLE_SA_KEY_FILE || '').trim()
 const REQUIRED_ENV = [
   [`FASTDO_EMAIL${SUFFIX}`, EMAIL],
   [`FASTDO_PASSWORD${SUFFIX}`, PASSWORD],
-  ['CATBOX_USERHASH', CATBOX_USERHASH],
+  ['DRIVE_CLIENT_ID', DRIVE_CLIENT_ID],
+  ['DRIVE_CLIENT_SECRET', DRIVE_CLIENT_SECRET],
+  ['DRIVE_REFRESH_TOKEN', DRIVE_REFRESH_TOKEN],
   ['TARGET_URL', TARGET_URL],
   ['SHEET_ID', SHEET_ID],
   // Một trong hai là đủ; có cả hai thì SHEET_GID thắng.
@@ -172,7 +181,12 @@ module.exports = {
   SHEET_ID_COLUMN: 'A',
   SHEET_RESULT_COLUMN: 'I', // Mặc định Lần 1
 
-  // Catbox
+  // Google Drive (video)
+  DRIVE_CLIENT_ID,
+  DRIVE_CLIENT_SECRET,
+  DRIVE_REFRESH_TOKEN,
+  DRIVE_FOLDER_ID,
+  // Catbox (đã thay bằng Drive)
   CATBOX_USERHASH,
 
   // Video recording options

@@ -1,6 +1,6 @@
 ---
 name: fastdo-eval-runner
-description: Chạy test QA tự động cho testcase Fastdo trong Google Sheet "fEvaluation - VIBE" — đọc đặc tả case từ Sheet, điều khiển Chrome thật qua CDP, quay video có con trỏ ảo, upload Catbox lấy link vĩnh viễn, ghi kết quả vào đúng cột vòng test. Dùng skill này bất cứ khi nào user nhắc tới mã EVAL_xxx, nói "test/chạy/kiểm thử/quay lại case", hỏi case đã chạy tới vòng mấy, nhờ viết kịch bản test cho một case, hoặc nhờ đọc báo cáo lỗi của một lần chạy — kể cả khi họ không gọi tên skill.
+description: Chạy test QA tự động cho testcase Fastdo trong Google Sheet "fEvaluation - VIBE" — đọc đặc tả case từ Sheet, điều khiển Chrome thật qua CDP, quay video có con trỏ ảo, upload Google Drive lấy link xem, ghi kết quả vào đúng cột vòng test. Dùng skill này bất cứ khi nào user nhắc tới mã EVAL_xxx, nói "test/chạy/kiểm thử/quay lại case", hỏi case đã chạy tới vòng mấy, nhờ viết kịch bản test cho một case, hoặc nhờ đọc báo cáo lỗi của một lần chạy — kể cả khi họ không gọi tên skill.
 ---
 
 # Fastdo Eval Runner
@@ -38,8 +38,9 @@ npm install
 cp .env.example .env
 ```
 
-Rồi điền vào `.env`: `FASTDO_EMAIL`, `FASTDO_PASSWORD`, `CATBOX_USERHASH`,
-`TARGET_URL` (dev tunnel hiện hành), `SHEET_ID`, `SHEET_TAB`.
+Rồi điền vào `.env`: `FASTDO_EMAIL`, `FASTDO_PASSWORD`,
+`TARGET_URL` (dev tunnel hiện hành), `SHEET_ID`, `SHEET_TAB`; Google Drive lưu video thì chạy
+`npm run drive:auth` (tự ghi `DRIVE_*`).
 Cần thêm `ffmpeg` trong PATH để quay video — thiếu nó vẫn chạy được nhưng phải
 thêm `--no-record`, và khi đó không có video nộp QC.
 
@@ -136,7 +137,7 @@ Nhiều case trong **một lệnh** thì dùng chung Chrome + session + tab Shee
 kiệm ~8–10 giây **mỗi** case so với gọi từng lệnh rời. Đây là đòn bẩy tốc độ lớn
 nhất khi chạy cả cụm — `plan` đã in sẵn lệnh gộp đúng cú pháp, chép lại là được.
 
-Bước này **quay video, upload lên Catbox (host công khai), và ghi vào Google
+Bước này **quay video, upload lên Google Drive (ai có link đều xem được), và ghi vào Google
 Sheet của team**. Đó là lý do phải chốt vòng ở Bước 2.
 
 ### 3b. Chạy song song 2 tài khoản — khi có nhiều case
@@ -190,7 +191,7 @@ theo dạng:
 ```
 EVAL_021 — ĐẠT (ghi TEST LẦN 3)
   Kết quả  : <resultText runner in ra>
-  Video    : https://files.catbox.moe/xxxxx.mp4
+  Video    : https://drive.google.com/file/d/xxxxx/view
   Sheet    : ô K23, Trạng thái = DONE
   Thời gian: 41.2s
 ```
@@ -243,7 +244,7 @@ quả kiểm thử. Đừng ép ghi.
 
 Video hỏng / upload chết mà app vẫn chạy được thì thử riêng đường ống ghi hình:
 `npm run smoke-test` (chỉ mở example.com, quay 1.5s, upload) — OK nghĩa là ffmpeg
-và Catbox đều sống, lỗi nằm ở phía testcase.
+và Google Drive đều sống, lỗi nằm ở phía testcase.
 
 ---
 
@@ -256,7 +257,7 @@ và Catbox đều sống, lỗi nằm ở phía testcase.
 3. **Không tự chọn `--round`.** Chốt với user (Bước 2).
 4. **Không bỏ bước chạy nháp.** Đừng chạy thẳng bản ghi Sheet khi chưa nháp xong.
 5. **Không tạo file test ngoài `src/testcases/`**, không sửa `session.js` /
-   `recorder.js` / `catbox.js` / `sheet_service.js` / `cursor_motion.js` /
+   `recorder.js` / `drive.js` / `sheet_service.js` / `cursor_motion.js` /
    `browser.js` khi chỉ đang viết 1 case.
 6. **Không tự quyết số case.** Làm đúng phạm vi user yêu cầu: nói 1 mã thì làm 1,
    nói "chạy nhóm EVAL_030→035" thì làm 6. Nhưng **không tự mở rộng ra ngoài phạm
@@ -316,7 +317,7 @@ Bảng case trên trang lấy từ `runs/.sheet-cache.json` (`npm run sheet:dump
 nguồn nhanh để biết Sheet đang có những mã nào mà không phải mở Chrome.
 
 Ranh giới của giao diện, cố ý đặt ra chứ không phải thiếu: chỉ nghe `127.0.0.1`;
-mật khẩu và `CATBOX_USERHASH` **không đọc, không sửa** được qua trình duyệt (chỉ hiện
+mật khẩu và `DRIVE_*` **không đọc, không sửa** được qua trình duyệt (chỉ hiện
 đã cấu hình hay chưa); `TARGET_URL` phải qua whitelist tên miền; không có ô nhập
 `--row`. Chi tiết trong `docs/superpowers/specs/2026-09-18-giao-dien-qc-design.md`.
 
@@ -335,7 +336,7 @@ Lệnh hay dùng nhất:
 npm run plan -- EVAL_021 EVAL_022     # chuẩn bị: hạ tầng + đặc tả + vòng test
 npm run plan -- EVAL_021 EVAL_022 EVAL_023 --split=2   # chia việc cho 2 tài khoản
 npm test -- EVAL_021 --no-record --no-sheet   # chạy nháp, an toàn
-npm test -- EVAL_021 --round=3        # chạy thật: video + Catbox + Sheet
+npm test -- EVAL_021 --round=3        # chạy thật: video + Google Drive + Sheet
 npm test -- EVAL_022 --account=2 --round=3    # chạy bằng tài khoản slot 2
 npm run test:auth                     # session hết hạn, đăng nhập lại (thêm --account=2 cho slot 2)
 npm run test:unit                     # test logic bố cục Sheet, ~0.1s, không cần trình duyệt

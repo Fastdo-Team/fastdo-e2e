@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // ============================================================================
-// aiqc.js: lệnh cho agent AI Code (AI-QC) — ghi Sheet testcase tổng theo ticket, đẩy video Catbox.
+// aiqc.js: lệnh cho agent AI Code (AI-QC) — ghi Sheet testcase tổng theo ticket, đẩy video lên Google Drive.
 //
 //   npm run aiqc -- prepare --ticket 1295 --title "Tiêu đề" [--cases-file f.json] [--max-ai 3]
 //   npm run aiqc -- results --ticket 1295 --file results.json
@@ -101,12 +101,12 @@ async function run(command, flags) {
       return {};
     }
     case 'upload': {
-      // Nạp muộn: catbox kéo node-fetch, các lệnh Sheet không cần.
-      const { uploadToCatbox } = require('../core/catbox');
+      // Nạp muộn: drive kéo node-fetch, các lệnh Sheet không cần. Catbox chết server 2026-10-22 → Google Drive.
+      const { uploadToDrive } = require('../core/drive');
       const file = need(flags, 'file');
       if (!fs.existsSync(file)) throw new UsageError(`Không thấy file video: ${file}`);
-      const url = await uploadToCatbox(file, flags.name || 'aiqc.mp4');
-      if (!url) throw new Error('Catbox không trả link (xem log [CATBOX] ở trên).');
+      const url = await uploadToDrive(file, flags.name || 'aiqc.mp4');
+      if (!url) throw new Error('Google Drive không trả link (xem log [DRIVE] ở trên).');
       return { url };
     }
     case 'scripts':

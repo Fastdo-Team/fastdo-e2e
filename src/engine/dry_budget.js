@@ -47,4 +47,20 @@ function takeDryBudget(caseIds, env = process.env) {
   return { budget, allowed, refused, counts };
 }
 
-module.exports = { takeDryBudget };
+/**
+ * Trả lại lượt cho các case kịch bản CHƯA KỊP chạy (lỗi khởi động Chrome / đăng nhập / vào app, sai khai báo) — lỗi hạ tầng không được ăn
+ * vào trần của AI (trước đây 2 lần runner dừng vì cấu hình vẫn tính 2 lượt).
+ */
+function refundDryBudget(caseIds, env = process.env) {
+  const ledger = String(env.AIQC_DRY_LEDGER || '').trim();
+  if (!ledger || !caseIds.length) return;
+  const counts = readLedger(ledger);
+  for (const id of caseIds) {
+    const used = Number(counts[id]) || 0;
+    if (used > 0) counts[id] = used - 1;
+  }
+  fs.mkdirSync(path.dirname(ledger), { recursive: true });
+  fs.writeFileSync(ledger, JSON.stringify(counts, null, 2), 'utf8');
+}
+
+module.exports = { takeDryBudget, refundDryBudget };

@@ -186,6 +186,8 @@ function listHelpers(dir = TESTCASE_DIR) {
     let m;
     while ((m = re.exec(source)) !== null) {
       if (!exported || typeof exported[m[2]] !== 'function') continue;
+      // Hàm đánh dấu @deprecated (vd tạo dữ liệu qua giao diện, thay bằng hàm ghi ctx.db) không mời phiên tái hiện dùng nữa
+      if (/@deprecated\b/.test(m[1])) continue;
       const params = m[3].replace(/\s+/g, ' ').trim();
       out.push({ file: name, name: `${m[2]}(${params})`, doc: firstDocLine(m[1]) });
     }

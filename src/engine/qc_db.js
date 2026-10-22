@@ -172,14 +172,33 @@ function createQcDb({ profile, targetUrl, env = process.env, print = console.log
     }
     const base = String(targetUrl).replace(/\/+$/, '');
     const id = String(st.company._id);
-    const users = await fetchFn(`${base}/GlobalService/SetUsers?company=${encodeURIComponent(`${id}_${secret}`)}`, { method: 'POST' });
-    const all = await fetchFn(`${base}/GlobalService/Update`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ Company: id, Secret: secret }),
-    });
+    // Có hạn chờ: bản test treo thì B0 báo lỗi rõ sau 15 giây thay vì chờ tới hết thời gian của cả case
+    const signal = () => (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined);
+    let users;
+    let all;
+    try {
+      users = await fetchFn(`${base}/GlobalService/SetUsers?company=${encodeURIComponent(`${id}_${secret}`)}`, { method: 'POST', signal: signal() });
+      all = await fetchFn(`${base}/GlobalService/Update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Company: id, Secret: secret }),
+        signal: signal(),
+      });
+    } catch (err) {
+      // không chép địa chỉ vào lỗi: chuỗi truy vấn có khoá làm mới cache
+      const why = err && err.name === 'TimeoutError' ? 'quá 15 giây' : err && err.message ? err.message : String(err);
+      throw new Error(`ctx.db.refreshCache: không gọi được bản test để làm mới cache (${why})`);
+    }
     cacheDirty = false;
-    return Boolean(users && users.ok && all && all.ok);
+    const ok = Boolean(users && users.ok && all && all.ok);
+    // Trước đây trả false lặng lẽ: giao diện không thấy dữ liệu vừa ghi, kịch bản báo «không thấy bản ghi» sai chỗ
+    if (!ok) {
+      print(
+        `   ⚠ ctx.db.refreshCache: bản test trả SetUsers ${users && users.status}, Update ${all && all.status} — ` +
+          'giao diện có thể chưa thấy dữ liệu vừa ghi (cache thành viên / phòng ban / ca làm)'
+      );
+    }
+    return ok;
   }
 
   const api = {
